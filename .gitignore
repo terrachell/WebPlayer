@@ -53,8 +53,3 @@ MusicPlayer-*.dmg
 *.swp
 *.swo
 *~
-
-# Личное (не для репозитория)
-all_files.txt
-zshrc.txt
-installer.sh
