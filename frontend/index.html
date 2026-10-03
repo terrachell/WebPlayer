@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✦ Музыкальный плеер</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="settings.css">
+    <script>
+    (function() {
+        const params = new URLSearchParams(window.location.search);
+        const theme = params.get('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        if (theme === 'light') {
+            document.documentElement.style.setProperty('--bg-primary', '#f0f0f5');
+            document.documentElement.style.setProperty('--background-body', '#f0f0f5');
+        }
+    })();
+    </script>
+    <style>
+        :root { --accent: #7c8cff; }
+    </style>
+</head>
+<body data-cover-size="medium">
+    <div class="drop-overlay" id="dropOverlay">
+        <div class="drop-overlay-content">
+            <span class="drop-icon">📁</span>
+            <span class="drop-text">Отпустите для добавления</span>
+            <span class="drop-sub">Аудиофайлы или папки с музыкой</span>
+        </div>
+    </div>
+
+    <div class="app">
+        <header>
+            <button class="menu-btn" id="menuBtn" onclick="toggleSidebar()">☰</button>
+            <div class="header-center">
+                <span class="header-info">
+                    <span id="trackCount">0</span> треков
+                </span>
+            </div>
+            <button class="add-btn-header" onclick="openFileDialog()" title="Добавить аудио">
+                ＋
+            </button>
+            <button class="settings-btn" onclick="openSettings()" title="Настройки">
+                ⚙️
+            </button>
+        </header>
+
+        <div class="main">
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-content">
+                    <h3>📁 Плейлисты</h3>
+                    <ul id="playlistList">
+                        <li class="playlist-item empty-state">Нет плейлистов</li>
+                    </ul>
+                </div>
+                <button class="add-playlist-btn" onclick="showModal()">＋ Добавить плейлист</button>
+            </aside>
+
+            <main class="content">
+                <div class="playlist-view" id="dropZone">
+                    <ul id="trackList">
+                        <li class="track-item empty">Перетащи трек или директорию сюда</li>
+                    </ul>
+                </div>
+
+                <div class="player-panel">
+                    <div class="player-row">
+                        <div class="player-left">
+                            <div class="current-track">
+                                <div class="now-playing">
+                                    <div class="cover-art" id="playerCover">
+                                        <span class="cover-placeholder">♪</span>
+                                    </div>
+                                    <div class="track-info">
+                                        <div class="track-name-wrapper-player">
+                                            <div class="track-name-player empty" id="trackName">Нет треков</div>
+                                        </div>
+                                        <div class="track-subline">
+                                            <span class="track-artist-player" id="trackArtist"></span>
+                                            <span class="track-dot" id="trackDot" hidden>•</span>
+                                            <span class="track-album-player" id="trackAlbum"></span>
+                                        </div>
+                                        <div class="track-time" id="trackTime">0:00 / 0:00</div>
+                                    </div>
+                                </div>
+                                <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+                            </div>
+
+                            <div class="controls">
+                                <button class="ctrl-btn" onclick="previousTrack()" title="Предыдущий">⏮</button>
+                                <button class="ctrl-btn play-btn" id="playBtn" onclick="togglePlay()">▶</button>
+                                <button class="ctrl-btn" onclick="stopTrack()" title="Стоп">⏹</button>
+                                <button class="ctrl-btn" onclick="nextTrack()" title="Следующий">⏭</button>
+                                <button class="shuffle-btn" id="shuffleBtn" onclick="toggleShuffle()" title="Перемешать">🔀</button>
+                                <button class="ctrl-btn" id="repeatBtn" onclick="toggleRepeat()" title="Повтор">🔁</button>
+                                <button class="ctrl-btn fav-btn" id="favBtn" onclick="toggleCurrentFavorite()" title="В избранное">♡</button>
+                            </div>
+                        </div>
+
+                        <div class="player-right">
+                            <div class="volume-vertical">
+                                <span class="vol-icon">🔊</span>
+                                <input type="range" id="volumeSlider" min="0" max="100" value="70"
+                                       oninput="setVolume(this.value)">
+                                <span class="volume-value" id="volumeValue">70%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <h2>Создать плейлист</h2>
+            <input type="text" id="modalInput" placeholder="Название плейлиста"
+                   onkeydown="if(event.key==='Enter') confirmCreate()">
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeModal()">Отмена</button>
+                <button class="modal-btn confirm" onclick="confirmCreate()">Создать</button>
+            </div>
+        </div>
+    </div>
+
+<div class="ctx-menu" id="ctxMenu" hidden>
+    <div class="ctx-item" data-action="rename">✏️ Переименовать</div>
+    <div class="ctx-item" data-action="artist">🎤 Изменить исполнителя</div>
+    <div class="ctx-item" data-action="album">💿 Изменить альбом</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" data-action="favorite">♥ В избранное</div>
+    <div class="ctx-item ctx-danger" data-action="delete">🗑 Удалить из плейлиста</div>
+</div>
+    <script src="settings.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

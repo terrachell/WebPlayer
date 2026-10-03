@@ -1,0 +1,593 @@
+/* ============================================================
+   SETTINGS.CSS — новый оверлей с сайдбаром
+   ============================================================ */
+
+/* ============================================================
+   Оверлей
+   ============================================================ */
+#settingsOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 18, 0.85);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text-primary, #b8c6db);
+}
+#settingsOverlay.visible {
+    opacity: 1;
+}
+
+.settings-shell {
+    width: 100%;
+    max-width: 980px;
+    height: 100%;
+    max-height: 640px;
+    background: var(--bg-secondary, #141425);
+    border: 1px solid var(--border-color, rgba(100, 120, 255, 0.06));
+    border-radius: 18px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+    display: flex;
+    overflow: hidden;
+    transform: translateY(10px);
+    transition: transform 0.2s ease;
+}
+#settingsOverlay.visible .settings-shell {
+    transform: translateY(0);
+}
+
+/* ============================================================
+   Сайдбар
+   ============================================================ */
+.settings-nav {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--bg-card, rgba(16, 20, 40, 0.6));
+    border-right: 1px solid var(--border-color, rgba(100, 120, 255, 0.06));
+    padding: 20px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+}
+
+.settings-nav-title {
+    font-size: 12px;
+    color: var(--text-muted, #4a5a7a);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    padding: 0 12px;
+    margin-bottom: 16px;
+}
+
+.settings-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #7a8aaa);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.15s, color 0.15s;
+    font-family: inherit;
+}
+.settings-nav-item:hover {
+    background: var(--bg-hover, rgba(124, 140, 255, 0.06));
+    color: var(--text-primary, #b8c6db);
+}
+.settings-nav-item.active {
+    background: var(--bg-active, rgba(124, 140, 255, 0.10));
+    color: var(--accent, #7c8cff);
+    font-weight: 500;
+}
+.nav-icon { font-size: 16px; }
+.nav-label { flex: 1; }
+
+/* ============================================================
+   Тело настроек
+   ============================================================ */
+.settings-body {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.settings-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--bg-track, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: all 0.15s;
+}
+.settings-close:hover {
+    background: rgba(255, 100, 100, 0.1);
+    color: #ff6b6b;
+    border-color: rgba(255, 100, 100, 0.2);
+}
+
+.settings-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 32px 32px 32px;
+}
+
+.settings-content h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-light, #d0d8ee);
+    margin-bottom: 24px;
+}
+
+/* ============================================================
+   Группы настроек
+   ============================================================ */
+.setting-group {
+    margin-bottom: 22px;
+    padding: 18px;
+    background: var(--bg-track, rgba(255, 255, 255, 0.03));
+    border-radius: 12px;
+    border: 1px solid var(--border-color, rgba(100, 120, 255, 0.06));
+}
+.setting-group:last-child { margin-bottom: 0; }
+
+.setting-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted, #4a5a7a);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 12px;
+}
+
+.setting-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.4;
+    opacity: 0.8;
+}
+
+.setting-input {
+    width: 100%;
+    background: var(--bg-track);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 15px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s;
+}
+.setting-input:focus {
+    border-color: var(--accent);
+}
+
+/* ============================================================
+   Тема (кнопки dark/light)
+   ============================================================ */
+.theme-toggle {
+    display: flex;
+    gap: 10px;
+}
+.theme-btn {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--bg-track);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.theme-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.theme-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--border-active);
+}
+
+/* ============================================================
+   Палитра акцентов
+   ============================================================ */
+.accent-picker {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.accent-swatch {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background: var(--swatch);
+    cursor: pointer;
+    transition: all 0.15s;
+    padding: 0;
+    position: relative;
+}
+.accent-swatch:hover {
+    transform: scale(1.08);
+}
+.accent-swatch.active {
+    border-color: var(--text-white);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15), 0 0 20px var(--swatch);
+}
+.accent-swatch.active::after {
+    content: '✓';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* ============================================================
+   Сегментированные переключатели
+   ============================================================ */
+.segmented {
+    display: inline-flex;
+    background: var(--bg-track);
+    border-radius: 10px;
+    padding: 4px;
+    gap: 2px;
+}
+.seg-btn {
+    padding: 8px 18px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.seg-btn:hover { color: var(--text-primary); }
+.seg-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+}
+
+/* ============================================================
+   Toggle switch
+   ============================================================ */
+.toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    cursor: pointer;
+    padding: 4px 0;
+}
+.toggle-switch input { display: none; }
+.toggle-switch .slider {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--bg-track);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.toggle-switch .slider:before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    top: 3px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    transition: all 0.2s;
+}
+.toggle-switch input:checked + .slider {
+    background: var(--accent-dim);
+    border-color: var(--border-active);
+}
+.toggle-switch input:checked + .slider:before {
+    transform: translateX(20px);
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+.toggle-label {
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+/* ============================================================
+   Эквалайзер
+   ============================================================ */
+.preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.preset-btn {
+    padding: 7px 14px;
+    background: var(--bg-track);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.preset-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.preset-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--border-active);
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.eq-group { padding-bottom: 10px; }
+
+.eq-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+.eq-current {
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.equalizer-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 20px 4px 8px 4px;
+}
+
+.eq-band {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.eq-slider {
+    writing-mode: bt-lr;
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    width: 8px;
+    height: 150px;
+    background: var(--bg-track);
+    border-radius: 4px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    outline: none;
+}
+.eq-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+.eq-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.eq-value {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-height: 14px;
+}
+.eq-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.eq-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.eq-btn {
+    padding: 8px 16px;
+    background: var(--bg-track);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.eq-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-active);
+}
+.eq-btn.accent {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--border-active);
+}
+.eq-btn.accent:hover {
+    background: var(--bg-hover);
+}
+.eq-btn.danger {
+    color: #ff6b6b;
+    border-color: rgba(255, 107, 107, 0.2);
+}
+.eq-btn.danger:hover {
+    background: rgba(255, 107, 107, 0.08);
+    border-color: rgba(255, 107, 107, 0.4);
+}
+
+/* ============================================================
+   Кастомные профили
+   ============================================================ */
+.custom-profiles {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.profile-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg-track);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+.profile-name {
+    flex: 1;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+.profile-name:hover { color: var(--accent); }
+.profile-actions {
+    display: flex;
+    gap: 4px;
+}
+.profile-act {
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 12px;
+    opacity: 0.6;
+    transition: all 0.15s;
+}
+.profile-act:hover {
+    opacity: 1;
+    background: var(--bg-hover);
+}
+.profile-act.danger { color: #ff6b6b; }
+.empty-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 8px 0;
+}
+
+/* ============================================================
+   Действия в библиотеке
+   ============================================================ */
+.action-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.action-row:last-child { margin-bottom: 0; }
+.action-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* ============================================================
+   About
+   ============================================================ */
+.about-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px;
+}
+.about-name {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-light);
+}
+.about-version {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.about-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+.about-list li::before {
+    content: '·';
+    margin-right: 8px;
+    color: var(--accent);
+}
+
+/* ============================================================
+   Адаптив
+   ============================================================ */
+@media (max-width: 720px) {
+    #settingsOverlay { padding: 0; }
+    .settings-shell {
+        max-width: none;
+        max-height: none;
+        border-radius: 0;
+    }
+    .settings-nav {
+        width: 60px;
+        padding: 16px 6px;
+    }
+    .settings-nav-title,
+    .nav-label { display: none; }
+    .settings-nav-item {
+        justify-content: center;
+        padding: 12px 8px;
+    }
+    .settings-content { padding: 20px 16px; }
+    .equalizer-container { overflow-x: auto; }
+}

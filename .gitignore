@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.spec
+
+# Данные приложения (генерируются в рантайме)
+covers/
+waveform_cache/
+tracks/
+state.json
+metadata.json
+playlists.json
+
+# Архивы и сборки
+*.zip
+*.dmg
+*.app/
+MusicPlayer-*.dmg
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Личное (не для репозитория)
+all_files.txt
+zshrc.txt
+installer.sh
