@@ -705,7 +705,7 @@ if __name__ == '__main__':
         print(f"🔍 handler.base_dir  = {CustomHTTPHandler.base_dir}")
         print(f"🔍 frontend_dir      = {frontend_dir}")
         print(f"🔍 api.player.covers = {api.player.covers_dir}")
-        webview.start(gui='cocoa', debug=True)
+        webview.start(gui='cocoa')
     finally:
         api._running = False
         api.player.shutdown()
