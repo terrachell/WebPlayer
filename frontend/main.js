@@ -184,11 +184,13 @@ function loadWaveform(data) {
     if (!data || !data.waveform) {
         waveformData = [];
         waveformDuration = 0;
+        currentPosition = 0;   // ← добавить
         drawWaveform();
         return;
     }
     waveformData = data.waveform;
     waveformDuration = data.duration;
+    currentPosition = 0;       // ← добавить
     drawWaveform();
 }
 
