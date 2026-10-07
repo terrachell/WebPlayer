@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================
-# Установщик Music Player 3.0 для macOS
+# Установщик Music Player 3.1.0 для macOS
 # ============================================================
 
 set -e
@@ -17,9 +17,9 @@ BUILD_DIR="/tmp/music_player_build"
 APP_DEST="$HOME/Applications/MusicPlayer.app"
 USER_DATA_DIR="$HOME/Library/Application Support/MusicPlayer"
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  🎵 Music Player 3.0 Installer (macOS)${NC}"
-echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}  🎵 Music Player 3.1.0 Installer (macOS)${NC}"
+echo -e "${BLUE}=========================================${NC}"
 
 # ============================================================
 # 1. Homebrew
@@ -164,7 +164,12 @@ if [ ! -d "$SCRIPT_DIR/frontend" ]; then
     echo -e "${RED}❌ frontend/ не найден в $SCRIPT_DIR${NC}"
     exit 1
 fi
-
+for f in frontend/visualizer.js frontend/shaders/vertex.glsl frontend/shaders/ripple.glsl; do
+    if [ ! -f "$SCRIPT_DIR/$f" ]; then
+        echo -e "${RED}❌ $f не найден в $SCRIPT_DIR${NC}"
+        exit 1
+    fi
+done
 echo -e "${GREEN}✅ Исходники на месте${NC}"
 
 # ============================================================
@@ -302,8 +307,8 @@ echo -e "${GREEN}✅ Очистка завершена${NC}"
 # ============================================================
 echo -e "\n${YELLOW}💿 Создание .dmg...${NC}"
 
-DMG_PATH="$SCRIPT_DIR/MusicPlayer-3.0.dmg"
-VOLUME_NAME="Music Player 3.0"
+DMG_PATH="$SCRIPT_DIR/MusicPlayer-3.1.dmg"
+VOLUME_NAME="Music Player 3.1"
 
 if [ -d "$APP_DEST" ]; then
     TMP_DIR="/tmp/dmg-build"
@@ -319,7 +324,7 @@ if [ -d "$APP_DEST" ]; then
     # Инструкция внутри .dmg
     cat > "$TMP_DIR/ЧИТАЙ_МЕНЯ.txt" << 'EOF'
 ============================================================
-  Music Player 3.0 — установка
+  Music Player 3.1.0 — установка
 ============================================================
 
 ЧТО НУЖНО СДЕЛАТЬ ПЕРЕД ПЕРВЫМ ЗАПУСКОМ:
@@ -370,6 +375,12 @@ if [ -d "$APP_DEST" ]; then
   • ПКМ по треку: переименовать, задать исполнителя,
     альбом, добавить в избранное.
   • Кэш waveform (бинарный, компактный).
+    • Фоновый визуализатор — волны реагируют на музыку.
+    Отключается в настройках.
+  • Две темы: «Стандартная» и «Минимализм»
+    (прозрачные панели, только текст и волны).
+  • Синхронизация визуализатора с музыкой
+    (клавиши [ и ] для подстройки).
 
 ------------------------------------------------------------
 
