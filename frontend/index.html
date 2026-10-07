@@ -7,21 +7,19 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="settings.css">
     <script>
-    (function() {
-        const params = new URLSearchParams(window.location.search);
-        const theme = params.get('theme') || 'dark';
-        document.documentElement.setAttribute('data-theme', theme);
-        if (theme === 'light') {
-            document.documentElement.style.setProperty('--bg-primary', '#f0f0f5');
-            document.documentElement.style.setProperty('--background-body', '#f0f0f5');
-        }
-    })();
+	(function() {
+		const params = new URLSearchParams(window.location.search);
+		const theme = params.get('theme') || 'dark';
+		document.documentElement.setAttribute('data-theme', theme);
+	})();
     </script>
     <style>
         :root { --accent: #7c8cff; }
     </style>
 </head>
 <body data-cover-size="medium">
+    <canvas id="bgVisualizer"></canvas>
+
     <div class="drop-overlay" id="dropOverlay">
         <div class="drop-overlay-content">
             <span class="drop-icon">📁</span>
@@ -124,15 +122,17 @@
         </div>
     </div>
 
-<div class="ctx-menu" id="ctxMenu" hidden>
-    <div class="ctx-item" data-action="rename">✏️ Переименовать</div>
-    <div class="ctx-item" data-action="artist">🎤 Изменить исполнителя</div>
-    <div class="ctx-item" data-action="album">💿 Изменить альбом</div>
-    <div class="ctx-sep"></div>
-    <div class="ctx-item" data-action="favorite">♥ В избранное</div>
-    <div class="ctx-item ctx-danger" data-action="delete">🗑 Удалить из плейлиста</div>
-</div>
+    <div class="ctx-menu" id="ctxMenu" hidden>
+        <div class="ctx-item" data-action="rename">✏️ Переименовать</div>
+        <div class="ctx-item" data-action="artist">🎤 Изменить исполнителя</div>
+        <div class="ctx-item" data-action="album">💿 Изменить альбом</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="favorite">♥ В избранное</div>
+        <div class="ctx-item ctx-danger" data-action="delete">🗑 Удалить из плейлиста</div>
+    </div>
+
     <script src="settings.js"></script>
+    <script src="visualizer.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

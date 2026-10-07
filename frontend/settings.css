@@ -591,3 +591,38 @@
     .settings-content { padding: 20px 16px; }
     .equalizer-container { overflow-x: auto; }
 }
+
+/* ============================================================
+   Кнопка «Свой цвет»
+   ============================================================ */
+.accent-custom {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.accent-custom input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+}
+
+.accent-custom .accent-custom-icon {
+    position: absolute;
+    font-size: 22px;
+    font-weight: 300;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    pointer-events: none;
+}
+
+.accent-custom.active .accent-custom-icon {
+    display: none;
+}

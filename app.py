@@ -29,9 +29,9 @@ for _path in _FFMPEG_PATHS:
 
 # VLC libs (cask, brew formula, вручную)
 _VLC_LIB_CANDIDATES = [
-    '/Applications/VLC.app/Contents/MacOS/lib',   # brew cask / ручная установка
-    '/opt/homebrew/lib',                          # brew formula (Apple Silicon)
-    '/usr/local/lib',                             # brew formula (Intel)
+    '/Applications/VLC.app/Contents/MacOS/lib',
+    '/opt/homebrew/lib',
+    '/usr/local/lib',
 ]
 for _p in _VLC_LIB_CANDIDATES:
     if os.path.exists(os.path.join(_p, 'libvlc.dylib')) or \
@@ -49,7 +49,7 @@ from music_player import MusicPlayer, AUDIO_EXTENSIONS, is_audio_file
 class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
     base_dir = None
     frontend_dir = None
-    covers_dir = None 
+    covers_dir = None
 
     def translate_path(self, path):
         path = path.split('?', 1)[0].split('#', 1)[0]
@@ -85,7 +85,7 @@ def _try_bind(handler_class, port, attempts=20):
             httpd = ReusableThreadingTCPServer(("0.0.0.0", p), handler_class)
             return httpd, p
         except OSError as e:
-            if e.errno in (48, 98):  # EADDRINUSE
+            if e.errno in (48, 98):
                 print(f"⚠️  Порт {p} занят, пробую {p + 1}...")
                 continue
             raise
@@ -95,7 +95,7 @@ def _try_bind(handler_class, port, attempts=20):
 def start_server(base_dir, frontend_dir, covers_dir, port, port_holder):
     CustomHTTPHandler.base_dir = base_dir
     CustomHTTPHandler.frontend_dir = frontend_dir
-    CustomHTTPHandler.covers_dir = covers_dir     # ← добавить
+    CustomHTTPHandler.covers_dir = covers_dir
     httpd, real_port = _try_bind(CustomHTTPHandler, port)
     port_holder[0] = real_port
     print(f"✅ Сервер слушает порт {real_port}")
@@ -123,9 +123,6 @@ class Api:
     def __init__(self):
         self.window = None
 
-        # Явно вычисляем путь к данным:
-        # - из .app → ~/Library/Application Support/MusicPlayer
-        # - из исходников → папка со скриптом
         import sys
         if getattr(sys, 'frozen', False):
             data_dir = Path.home() / 'Library' / 'Application Support' / 'MusicPlayer'
@@ -172,20 +169,35 @@ class Api:
     # ---------------- Обновления UI ----------------
 
     def _start_progress_updater(self):
+        """
+        Лёгкий цикл: только позиция и playing. Без get_status().
+        Применяет offset из настроек.
+        """
         def update_loop():
             while self._running:
                 if self.window:
                     try:
-                        status = self.player.get_status()
-                        position = status.get('position', 0)
+                        position = self.player.get_position()
+                        playing = self.player.is_playing
+                        duration_ms = self.player.get_duration_ms()
+                        offset_ms = self.player.get_position_offset_ms()
+
+                        # Применяем offset к позиции
+                        if duration_ms > 0:
+                            position += offset_ms / duration_ms
+                            position = max(0.0, min(1.0, position))
+
                         self.window.evaluate_js(f"""
                             if (typeof updateProgress === 'function') {{
                                 updateProgress({position});
                             }}
+                            if (typeof Visualizer !== 'undefined') {{
+                                Visualizer.setPlaying({str(playing).lower()});
+                            }}
                         """)
                     except Exception:
                         pass
-                time.sleep(0.3)
+                time.sleep(0.016)
 
         threading.Thread(target=update_loop, daemon=True).start()
 
@@ -281,7 +293,6 @@ class Api:
                 except Exception:
                     pass
 
-            # Найти ffmpeg
             ffmpeg_bin = None
             for p in ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']:
                 if os.path.exists(p):
@@ -291,7 +302,6 @@ class Api:
                 print("waveform: ffmpeg not found")
                 return None
 
-            # Декодируем в сырой mono PCM 16-bit, 8000 Hz
             cmd = [
                 ffmpeg_bin, '-i', file_path,
                 '-f', 's16le', '-acodec', 'pcm_s16le',
@@ -538,7 +548,6 @@ class Api:
         return True
 
     def get_dropped_folder_path(self):
-        """macOS: получить путь к выделенному в Finder объекту."""
         script = '''
             tell application "Finder"
                 set selectedItems to selection
@@ -567,7 +576,6 @@ class Api:
         return None
 
     def open_in_vlc(self, path):
-        """Открывает файл во внешнем VLC.app."""
         if not path or not os.path.exists(path):
             return False
         try:
@@ -627,7 +635,6 @@ if __name__ == '__main__':
     theme = settings.get('theme', 'dark') if settings else 'dark'
     api.player._theme = theme
 
-    # ВАЖНО: папка frontend лежит внутри .app, поэтому используем _MEIPASS
     import sys
     if getattr(sys, 'frozen', False):
         base_dir = Path(sys._MEIPASS)
@@ -698,7 +705,7 @@ if __name__ == '__main__':
         print(f"🔍 handler.base_dir  = {CustomHTTPHandler.base_dir}")
         print(f"🔍 frontend_dir      = {frontend_dir}")
         print(f"🔍 api.player.covers = {api.player.covers_dir}")
-        webview.start(gui='cocoa')
+        webview.start(gui='cocoa', debug=True)
     finally:
         api._running = False
         api.player.shutdown()

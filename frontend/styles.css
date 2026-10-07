@@ -10,6 +10,7 @@
 	--bg-hover: rgba(124, 140, 255, 0.06);
 	--bg-active: rgba(124, 140, 255, 0.10);
 	--bg-eq: rgba(16, 20, 40, 0.4);
+	--bg-panel: rgba(20, 20, 37, 0.55);
 
 	--text-primary: #b8c6db;
 	--text-secondary: #7a8aaa;
@@ -34,37 +35,54 @@
 	--fav-color: #ff6b8a;
 }
 
-[data-theme="light"] {
-	--bg-primary: #f0f0f5;
-	--bg-secondary: #ffffff;
-	--bg-card: rgba(255, 255, 255, 0.7);
-	--bg-player: rgba(255, 255, 255, 0.8);
-	--bg-track: rgba(0, 0, 0, 0.04);
-	--bg-hover: rgba(74, 108, 247, 0.06);
-	--bg-active: rgba(74, 108, 247, 0.10);
-	--bg-eq: rgba(0, 0, 0, 0.03);
+/* ============================================================
+   ТЕМА: МИНИМАЛИЗМ
+   Панели прозрачные, фон — тёмный (под визуализатор),
+   видны только текст, обложки и кнопки.
+   ============================================================ */
+[data-theme="minimal"] {
+	--bg-primary: #0a0a12;
+	--bg-secondary: transparent;
+	--bg-card: transparent;
+	--bg-player: transparent;
+	--bg-track: rgba(255, 255, 255, 0.06);
+	--bg-hover: rgba(255, 255, 255, 0.05);
+	--bg-active: rgba(124, 140, 255, 0.12);
+	--bg-eq: rgba(255, 255, 255, 0.03);
+	--bg-panel: transparent;
 
-	--text-primary: #1a1a2e;
-	--text-secondary: #555577;
-	--text-muted: #8888aa;
-	--text-light: #2a2a4e;
-	--text-white: #1a1a2e;
+	--text-primary: #d0d8ee;
+	--text-secondary: #9aa8c0;
+	--text-muted: #6a7a96;
+	--text-light: #e0e6f5;
+	--text-white: #ffffff;
 
-	--accent: #4A6CF7;
-	--accent-dim: rgba(74, 108, 247, 0.12);
-	--accent-glow: rgba(74, 108, 247, 0.15);
-	--accent-border: rgba(74, 108, 247, 0.08);
+	--accent: #7c8cff;
+	--accent-dim: rgba(124, 140, 255, 0.16);
+	--accent-glow: rgba(124, 140, 255, 0.20);
+	--accent-border: rgba(124, 140, 255, 0.10);
 
-	--border-color: rgba(0, 0, 0, 0.06);
-	--border-light: rgba(0, 0, 0, 0.08);
-	--border-active: rgba(74, 108, 247, 0.3);
+	--border-color: transparent;
+	--border-light: transparent;
+	--border-active: rgba(124, 140, 255, 0.3);
 
-	--shadow: rgba(0, 0, 0, 0.08);
-	--shadow-glow: rgba(74, 108, 247, 0.12);
-	--scrollbar: rgba(0, 0, 0, 0.12);
-	--background-body: #f0f0f5;
+	--shadow: transparent;
+	--shadow-glow: rgba(124, 140, 255, 0.20);
+	--scrollbar: rgba(124, 140, 255, 0.20);
+	--background-body: #0a0a12;
 
-	--fav-color: #e91e63;
+	--fav-color: #ff6b8a;
+}
+
+/* В минимализме — убираем фоны, blur и границы у панелей */
+[data-theme="minimal"] .sidebar,
+[data-theme="minimal"] .content,
+[data-theme="minimal"] .player-panel {
+	background: transparent;
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+	border: none;
+	box-shadow: none;
 }
 
 * {
@@ -83,14 +101,29 @@ body {
 	transition: background 0.3s, color 0.3s;
 }
 
+/* ============================================================
+   BACKGROUND VISUALIZER
+   ============================================================ */
+#bgVisualizer {
+	position: fixed;
+	inset: 0;
+	width: 100vw;
+	height: 100vh;
+	z-index: 0;
+	pointer-events: none;
+	display: block;
+}
+
 .app {
 	display: flex;
 	flex-direction: column;
 	height: 100vh;
 	width: 100vw;
 	padding: 12px 16px;
-	background: var(--bg-primary);
+	background: transparent;
 	overflow: hidden;
+	position: relative;
+	z-index: 1;
 	transition: background 0.3s;
 }
 
@@ -104,6 +137,10 @@ header {
 	padding-bottom: 10px;
 	border-bottom: 1px solid var(--border-color);
 	flex-shrink: 0;
+}
+
+[data-theme="minimal"] header {
+	border-bottom: none;
 }
 
 .menu-btn {
@@ -187,8 +224,9 @@ header {
 
 .sidebar {
 	width: 220px;
-	background: var(--bg-card);
-	backdrop-filter: blur(10px);
+	background: var(--bg-panel);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 	border: 1px solid var(--border-color);
 	border-radius: 12px;
 	padding: 14px;
@@ -327,7 +365,9 @@ header {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	background: var(--bg-secondary);
+	background: var(--bg-panel);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 	border: 1px solid var(--border-color);
 	border-radius: 12px;
 	padding: 12px 16px;
@@ -521,8 +561,9 @@ header {
    ============================================================ */
 .player-panel {
 	flex-shrink: 0;
-	background: var(--bg-player);
-	backdrop-filter: blur(10px);
+	background: var(--bg-panel);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 	border: 1px solid var(--border-color);
 	border-radius: 10px;
 	padding: 12px 16px;
@@ -552,7 +593,6 @@ header {
 	margin-bottom: 4px;
 }
 
-/* ----- Now Playing карточка ----- */
 .now-playing {
 	display: flex;
 	gap: 12px;
@@ -1051,6 +1091,11 @@ header {
 	font-size: 13px;
 	color: var(--text-primary);
 	animation: ctxFade 0.12s ease;
+}
+
+[data-theme="minimal"] .ctx-menu {
+	background: rgba(20, 20, 37, 0.95);
+	border: 1px solid rgba(124, 140, 255, 0.1);
 }
 
 .ctx-menu[hidden] {

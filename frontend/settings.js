@@ -21,17 +21,26 @@
     };
 
     const ACCENTS = [
+        // Универсальные — хорошо смотрятся в обеих темах
         { name: 'Индиго',    value: '#7c8cff' },
         { name: 'Мята',      value: '#4ade80' },
         { name: 'Роза',      value: '#f472b6' },
         { name: 'Янтарь',    value: '#fbbf24' },
         { name: 'Лазурь',    value: '#22d3ee' },
         { name: 'Сирень',    value: '#a78bfa' },
+        // Для светлой темы — тёмные, приглушённые
+        { name: 'Океан',     value: '#2563eb' },
+        { name: 'Изумруд',   value: '#059669' },
+        { name: 'Вино',      value: '#be123c' },
+        { name: 'Медь',      value: '#b45309' },
+        { name: 'Сталь',     value: '#475569' },
+        { name: 'Фуксия',    value: '#c026d3' },
     ];
 
     const SECTIONS = [
         { id: 'appearance', icon: '🎨', label: 'Внешний вид' },
         { id: 'player',     icon: '▶️', label: 'Плеер' },
+        { id: 'visualizer', icon: '✨', label: 'Визуализатор' },
         { id: 'equalizer',  icon: '🎚', label: 'Эквалайзер' },
         { id: 'library',    icon: '📚', label: 'Библиотека' },
         { id: 'about',      icon: 'ℹ️', label: 'О программе' },
@@ -43,7 +52,6 @@
     let overlay = null;
     let activeSection = 'appearance';
 
-    // Локальная копия всех настроек
     const state = {
         theme: 'dark',
         accent: '#7c8cff',
@@ -56,6 +64,10 @@
         waveform_points: 2000,
         playlist_limit: 1000,
         resume_on_start: true,
+        visualizer_enabled: true,
+        visualizer_intensity: 1.0,
+        visualizer_palette: 'spectrum',
+        position_offset_ms: 0,
     };
 
     // ============================================================
@@ -77,12 +89,77 @@
     }
 
     // ============================================================
-    // ===== ПРИМЕНЕНИЕ НАСТРОЕК К UI =============================
+    // ===== ЦВЕТ: УТИЛИТЫ ========================================
     // ============================================================
+    function hexToRgb(hex) {
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return m ? {
+            r: parseInt(m[1], 16),
+            g: parseInt(m[2], 16),
+            b: parseInt(m[3], 16),
+        } : null;
+    }
+
+    function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+
+        if (max === min) {
+            h = s = 0;
+        } else {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = ((g - b) / d + (g < b ? 6 : 0)); break;
+                case g: h = ((b - r) / d + 2); break;
+                case b: h = ((r - g) / d + 4); break;
+            }
+            h /= 6;
+        }
+        return { h, s, l };
+    }
+
+    function hslToHex(h, s, l) {
+        const a = s * Math.min(l, 1 - l);
+        const f = (n) => {
+            const k = (n + h * 12) % 12;
+            return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+        };
+        const toHex = (n) => n.toString(16).padStart(2, '0');
+        return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+    }
+
+    /**
+     * Корректирует акцентный цвет под текущую тему.
+     * В светлой теме яркие цвета притемняются, чтобы текст читался.
+     */
+    function adjustAccentForTheme(hex, theme) {
+        if (theme !== 'light') return hex;
+
+        const rgb = hexToRgb(hex);
+        if (!rgb) return hex;
+
+        const { h, s, l } = rgbToHsl(rgb.r, rgb.g, rgb.b);
+
+        let newL = l;
+        // Если цвет слишком светлый — притемняем
+        if (l > 0.55) newL = 0.45;
+        // Если слишком тёмный — чуть осветляем
+        if (l < 0.25) newL = 0.35;
+
+        // Немного повышаем насыщенность для «сочности»
+        const newS = Math.min(1, s * 1.1);
+
+        return hslToHex(h, newS, newL);
+    }
+
     function applyAccent(color) {
-        document.documentElement.style.setProperty('--accent', color);
-        // Производные оттенки
-        const rgb = hexToRgb(color);
+        const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+        const adjusted = adjustAccentForTheme(color, theme);
+
+        document.documentElement.style.setProperty('--accent', adjusted);
+        const rgb = hexToRgb(adjusted);
         if (rgb) {
             document.documentElement.style.setProperty('--accent-dim', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`);
             document.documentElement.style.setProperty('--accent-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`);
@@ -92,15 +169,6 @@
 
     function applyCoverSize(size) {
         document.body.setAttribute('data-cover-size', size);
-    }
-
-    function hexToRgb(hex) {
-        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return m ? {
-            r: parseInt(m[1], 16),
-            g: parseInt(m[2], 16),
-            b: parseInt(m[3], 16),
-        } : null;
     }
 
     // ============================================================
@@ -133,7 +201,6 @@
     function renderSection(id) {
         activeSection = id;
 
-        // Подсветка активного пункта меню
         document.querySelectorAll('.settings-nav-item').forEach(el => {
             el.classList.toggle('active', el.dataset.section === id);
         });
@@ -144,6 +211,7 @@
         switch (id) {
             case 'appearance': renderAppearance(content); break;
             case 'player':     renderPlayer(content); break;
+            case 'visualizer': renderVisualizer(content); break;
             case 'equalizer':  renderEqualizer(content); break;
             case 'library':    renderLibrary(content); break;
             case 'about':      renderAbout(content); break;
@@ -152,6 +220,8 @@
 
     // ---------- Внешний вид ----------
     function renderAppearance(root) {
+        const isCustomAccent = !ACCENTS.find(a => a.value === state.accent);
+
         root.innerHTML = `
             <h2>🎨 Внешний вид</h2>
 
@@ -159,9 +229,9 @@
                 <div class="setting-label">Тема оформления</div>
                 <div class="theme-toggle">
                     <button class="theme-btn ${state.theme === 'dark' ? 'active' : ''}"
-                            data-theme="dark" onclick="window.__setTheme('dark')">🌙 Тёмная</button>
+                            data-theme="dark" onclick="window.__setTheme('dark')">🌙 Стандарт</button>
                     <button class="theme-btn ${state.theme === 'light' ? 'active' : ''}"
-                            data-theme="light" onclick="window.__setTheme('light')">☀️ Светлая</button>
+                            data-theme="light" onclick="window.__setTheme('minimal')">✨ Magic</button>
                 </div>
             </div>
 
@@ -175,7 +245,16 @@
                                 title="${a.name}"
                                 onclick="window.__setAccent('${a.value}')"></button>
                     `).join('')}
+                    <label class="accent-swatch accent-custom ${isCustomAccent ? 'active' : ''}"
+                           title="Свой цвет"
+                           style="--swatch: ${state.accent}">
+                        <input type="color"
+                               value="${state.accent}"
+                               oninput="window.__setAccent(this.value)">
+                        <span class="accent-custom-icon">+</span>
+                    </label>
                 </div>
+                <div class="setting-hint">Выбери готовый цвет или нажми «+», чтобы задать свой. В светлой теме яркие цвета автоматически притемняются.</div>
             </div>
 
             <div class="setting-group">
@@ -228,6 +307,68 @@
                     `).join('')}
                 </div>
                 <div class="setting-hint">Больше точек — детальнее волна, но дольше первая отрисовка и больше кэш.</div>
+            </div>
+
+            <div class="setting-group">
+                <div class="setting-label">Синхронизация позиции</div>
+                <div class="action-row">
+                    <input type="range" min="-500" max="500" step="25"
+                           value="${state.position_offset_ms || 0}"
+                           oninput="window.__setOffset(this.value)"
+                           style="flex:1;">
+                    <span class="action-hint" id="offsetValue" style="min-width:70px;text-align:right;">${state.position_offset_ms || 0} мс</span>
+                </div>
+                <div class="setting-hint">Если визуализатор отстаёт от музыки — сдвинь вправо. Если спешит — влево. Клавиши [ и ] в главном окне для быстрой подстройки.</div>
+            </div>
+        `;
+    }
+
+    // ---------- Визуализатор ----------
+    function renderVisualizer(root) {
+        root.innerHTML = `
+            <h2>✨ Визуализатор</h2>
+
+            <div class="setting-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" ${state.visualizer_enabled ? 'checked' : ''}
+                           onchange="window.__setBool('visualizer_enabled', this.checked)">
+                    <span class="slider"></span>
+                    <span class="toggle-label">Включить визуализатор</span>
+                </label>
+                <div class="setting-hint">Волны на фоне, реагирующие на громкость музыки. Отключи, если экономишь батарею.</div>
+            </div>
+
+            <div class="setting-group">
+                <div class="setting-label">Интенсивность</div>
+                <div class="segmented">
+                    ${[
+                        { v: 0.5, label: 'Слабая' },
+                        { v: 1.0, label: 'Средняя' },
+                        { v: 1.8, label: 'Сильная' },
+                    ].map(o => `
+                        <button class="seg-btn ${Math.abs(state.visualizer_intensity - o.v) < 0.01 ? 'active' : ''}"
+                                onclick="window.__setVisualizerIntensity(${o.v})">
+                            ${o.label}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <div class="setting-label">Палитра</div>
+                <div class="segmented">
+                    ${[
+                        { v: 'spectrum', label: 'Спектр' },
+                        { v: 'warm',     label: 'Тёплая' },
+                        { v: 'cool',     label: 'Холодная' },
+                    ].map(o => `
+                        <button class="seg-btn ${state.visualizer_palette === o.v ? 'active' : ''}"
+                                onclick="window.__setVisualizerPalette('${o.v}')">
+                            ${o.label}
+                        </button>
+                    `).join('')}
+                </div>
+                <div class="setting-hint">Спектр — весь диапазон оттенков. Тёплая и холодная — фиксированные поддиапазоны.</div>
             </div>
         `;
     }
@@ -317,7 +458,6 @@
                 const val = parseFloat(this.value);
                 state.eq_values[parseInt(this.dataset.index)] = val;
                 value.textContent = val.toFixed(1);
-                // Когда крутим ползунок — переключаемся на Custom
                 if (state.eq_profile !== 'Custom') {
                     state.eq_profile = 'Custom';
                     updateProfileHighlight();
@@ -407,7 +547,7 @@
             <div class="setting-group">
                 <div class="about-block">
                     <div class="about-name">✦ Музыкальный плеер</div>
-                    <div class="about-version">Версия 2.0</div>
+                    <div class="about-version">Версия 4.0</div>
                 </div>
             </div>
 
@@ -418,6 +558,7 @@
                     <li>VLC (libvlc) — воспроизведение</li>
                     <li>tinytag — чтение метаданных</li>
                     <li>pydub + ffmpeg — waveform</li>
+                    <li>WebGL — фоновый визуализатор</li>
                 </ul>
             </div>
 
@@ -440,6 +581,9 @@
         } else {
             document.documentElement.setAttribute('data-theme', theme);
         }
+        // Переприменяем акцент с учётом новой темы
+        applyAccent(state.accent);
+
         document.querySelectorAll('.theme-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.theme === theme);
         });
@@ -450,6 +594,10 @@
         state.accent = color;
         applyAccent(color);
         document.querySelectorAll('.accent-swatch').forEach(el => {
+            if (el.classList.contains('accent-custom')) {
+                el.style.setProperty('--swatch', color);
+                el.querySelector('input').value = color;
+            }
             el.classList.toggle('active', el.dataset.color === color);
         });
         saveToAPI();
@@ -466,6 +614,9 @@
 
     window.__setBool = function(key, value) {
         state[key] = value;
+        if (key === 'visualizer_enabled' && typeof Visualizer !== 'undefined') {
+            Visualizer.setEnabled(value);
+        }
         saveToAPI();
     };
 
@@ -474,7 +625,6 @@
         document.querySelectorAll('.segmented .seg-btn').forEach(el => {
             if (el.textContent.trim() === String(points)) el.classList.add('active');
         });
-        // перерисуем всю секцию плеера, чтобы все переключатели были корректны
         renderSection('player');
         saveToAPI();
     };
@@ -484,6 +634,42 @@
         if (!isNaN(v) && v >= 0) {
             state.playlist_limit = v;
             saveToAPI();
+        }
+    };
+
+    window.__setVisualizerIntensity = function(v) {
+        state.visualizer_intensity = v;
+        if (typeof Visualizer !== 'undefined') Visualizer.setIntensity(v);
+        renderSection('visualizer');
+        saveToAPI();
+    };
+
+    window.__setVisualizerPalette = function(p) {
+        state.visualizer_palette = p;
+        const hueShift = p === 'warm' ? 0.05 : p === 'cool' ? 0.55 : 0.0;
+        if (typeof Visualizer !== 'undefined') Visualizer.setHueShift(hueShift);
+        renderSection('visualizer');
+        saveToAPI();
+    };
+
+    window.__setOffset = function(ms) {
+        const v = parseInt(ms);
+        if (isNaN(v)) return;
+        state.position_offset_ms = v;
+        const valueEl = document.getElementById('offsetValue');
+        if (valueEl) valueEl.textContent = `${v} мс`;
+        saveToAPI();
+    };
+
+    window.__adjustOffset = function(delta) {
+        const v = (state.position_offset_ms || 0) + delta;
+        const clamped = Math.max(-500, Math.min(500, v));
+        state.position_offset_ms = clamped;
+        const valueEl = document.getElementById('offsetValue');
+        if (valueEl) valueEl.textContent = `${clamped} мс`;
+        saveToAPI();
+        if (typeof window.showOffsetToast === 'function') {
+            window.showOffsetToast(clamped);
         }
     };
 
@@ -583,10 +769,20 @@
         state.waveform_points = 2000;
         state.playlist_limit = 1000;
         state.resume_on_start = true;
+        state.visualizer_enabled = true;
+        state.visualizer_intensity = 1.0;
+        state.visualizer_palette = 'spectrum';
+        state.position_offset_ms = 0;
 
         applyAccent(state.accent);
         applyCoverSize(state.cover_size);
         if (typeof window.switchTheme === 'function') window.switchTheme('dark', false);
+
+        if (typeof Visualizer !== 'undefined') {
+            Visualizer.setEnabled(true);
+            Visualizer.setIntensity(1.0);
+            Visualizer.setHueShift(0.0);
+        }
 
         await saveToAPI();
         renderSection(activeSection);
@@ -596,9 +792,9 @@
     // ===== ОТКРЫТИЕ / ЗАКРЫТИЕ ==================================
     // ============================================================
     window.openSettings = async function() {
-        if (overlay && overlay.style.display !== 'none') return;
+        // Проверяем, есть ли оверлей в DOM
+        if (document.getElementById('settingsOverlay')) return;
 
-        // Загружаем актуальные настройки из API
         try {
             const data = await apiCall('get_settings');
             if (data) {
@@ -606,6 +802,9 @@
                 if (!state.custom_profiles) state.custom_profiles = {};
                 if (!Array.isArray(state.eq_values) || state.eq_values.length !== 10) {
                     state.eq_values = new Array(10).fill(0);
+                }
+                if (typeof state.position_offset_ms !== 'number') {
+                    state.position_offset_ms = 0;
                 }
             }
         } catch (e) {
@@ -617,7 +816,6 @@
         overlay.innerHTML = buildOverlayHTML();
         document.body.appendChild(overlay);
 
-        // Обработчики навигации
         overlay.querySelectorAll('.settings-nav-item').forEach(btn => {
             btn.onclick = () => renderSection(btn.dataset.section);
         });
@@ -636,7 +834,6 @@
         }, 180);
     };
 
-    // Закрытие по Escape
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && overlay) window.closeSettings();
     });

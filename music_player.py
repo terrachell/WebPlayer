@@ -14,16 +14,10 @@ except ImportError:
     TinyTag = None
 
 
-# ============================================================
-# ===== ПОДДЕРЖИВАЕМЫЕ АУДИОФОРМАТЫ ==========================
-# ============================================================
 AUDIO_EXTENSIONS = {
-    # lossy
     '.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wma', '.mpc', '.amr',
-    # lossless
     '.flac', '.wav', '.aiff', '.aif', '.alac', '.ape', '.wv', '.tta',
     '.dsf', '.dff', '.caf', '.au',
-    # прочее, что играет VLC
     '.mka', '.ac3', '.dts', '.mid', '.midi', '.mod', '.xm', '.it', '.s3m',
     '.m4b', '.ra', '.rm',
 }
@@ -38,10 +32,7 @@ def is_audio_file(path):
 class MusicPlayer:
     def __init__(self, index_file="playlists.json", state_file="state.json",
                  metadata_file="metadata.json", base_dir=None):
-        # base_dir ОБЯЗАТЕЛЬНО передаётся из app.py — там мы точно знаем,
-        # запущены мы из .app или из исходников.
         if base_dir is None:
-            # Fallback на случай прямого запуска MusicPlayer без app.py
             import sys
             if getattr(sys, 'frozen', False):
                 self.base_dir = Path.home() / 'Library' / 'Application Support' / 'MusicPlayer'
@@ -78,7 +69,6 @@ class MusicPlayer:
         self._eq_enabled = True
         self._eq_values = [0.0] * 10
 
-        # ---- Настройки ----
         self._accent = '#7c8cff'
         self._cover_size = 'medium'
         self._eq_profile = 'Flat'
@@ -88,25 +78,29 @@ class MusicPlayer:
         self._playlist_limit = 1000
         self._resume_on_start = True
 
+        # Визуализатор
+        self._visualizer_enabled = True
+        self._visualizer_intensity = 1.0
+        self._visualizer_palette = 'spectrum'
+
+        # Синхронизация позиции
+        self._position_offset_ms = 0
+
         self.update_callback = None
         self.event_manager = None
         self._lock = threading.Lock()
 
-        # Метаданные
         self.metadata = {}
         self._tag_cache = {}
 
-        # Отложенная запись metadata.json
         self._meta_dirty = False
         self._meta_last_save = 0.0
         self._meta_save_interval = 5.0
 
-        # Отложенная запись state.json
         self._state_dirty = False
         self._state_last_save = 0.0
         self._state_save_interval = 5.0
 
-        # Виртуальные плейлисты
         self.VIRTUAL_FAVORITES = "⭐ Избранное"
         self.VIRTUAL_MOST_PLAYED = "🔥 Часто прослушиваемое"
         self.VIRTUAL_NAMES = {self.VIRTUAL_FAVORITES, self.VIRTUAL_MOST_PLAYED}
@@ -118,8 +112,6 @@ class MusicPlayer:
         self._prepare_media()
 
     def get_time_ms(self):
-        """Текущая позиция в миллисекундах."""
-        # Если играем — доверяем VLC
         if self.is_playing and self.player:
             try:
                 t = self.player.get_time()
@@ -128,12 +120,10 @@ class MusicPlayer:
             except Exception:
                 pass
 
-        # Если на паузе (или ещё не играли) — берём из _saved_position
         d = self.get_duration_ms()
         if d > 0 and self._saved_position > 0:
             return int(self._saved_position * d)
 
-        # Fallback на VLC (на случай, если _saved_position = 0, но VLC знает)
         if self.player:
             try:
                 t = self.player.get_time()
@@ -144,7 +134,6 @@ class MusicPlayer:
         return 0
 
     def get_duration_ms(self):
-        """Длительность текущего медиа в миллисекундах."""
         if self.player:
             try:
                 d = self.player.get_length()
@@ -152,7 +141,6 @@ class MusicPlayer:
                     return int(d)
             except Exception:
                 pass
-        # Fallback из тегов
         if self._current_track_path:
             tags = self._tag_cache.get(self._current_track_path)
             if tags and tags.get('duration', 0) > 0:
@@ -160,7 +148,6 @@ class MusicPlayer:
         return -1
 
     def seek_ms(self, ms):
-        """Точная перемотка в миллисекундах."""
         if not self.player:
             return False
         try:
@@ -171,6 +158,21 @@ class MusicPlayer:
         if d > 0:
             self._saved_position = max(0.0, min(1.0, ms / d))
         self._save_state()
+        return True
+
+    # ==================== OFFSET ====================
+
+    def get_position_offset_ms(self):
+        return self._position_offset_ms
+
+    def set_position_offset_ms(self, ms):
+        try:
+            self._position_offset_ms = int(ms)
+        except (TypeError, ValueError):
+            return False
+        self._save_state(force=True)
+        if self.update_callback:
+            self.update_callback()
         return True
 
     # ==================== ПЛЕЙЛИСТЫ ====================
@@ -248,8 +250,6 @@ class MusicPlayer:
             self.metadata[path] = {}
         return self.metadata[path]
 
-    # ---------- Теги ----------
-
     def _extract_tags(self, path):
         if path in self._tag_cache:
             return self._tag_cache[path]
@@ -311,8 +311,6 @@ class MusicPlayer:
                 return None
         return f"covers/{filename}"
 
-    # ---------- Объединённая информация ----------
-
     def get_track_info(self, path):
         if not path:
             return None
@@ -345,8 +343,6 @@ class MusicPlayer:
         if 0 <= index < len(self.tracks):
             return self.get_track_info(self.tracks[index])
         return None
-
-    # ---------- Правки метаданных ----------
 
     def set_track_meta(self, path, **fields):
         if not path:
@@ -417,14 +413,18 @@ class MusicPlayer:
             self._playlist_limit = int(state.get('playlist_limit', 1000))
             self._resume_on_start = state.get('resume_on_start', True)
 
+            self._visualizer_enabled = state.get('visualizer_enabled', True)
+            self._visualizer_intensity = float(state.get('visualizer_intensity', 1.0))
+            self._visualizer_palette = state.get('visualizer_palette', 'spectrum')
+
+            self._position_offset_ms = int(state.get('position_offset_ms', 0))
+
             self._shuffle = state.get('shuffle', False)
             self._saved_position = state.get('saved_position', 0.0)
 
             last_playlist = state.get('last_playlist')
             last_track = state.get('last_track')
-            # last_index игнорируем — источник правды только путь
 
-            # ---- Плейлист ----
             if last_playlist and (last_playlist in self.playlists or last_playlist in self.VIRTUAL_NAMES):
                 self.current_playlist = last_playlist
                 self.tracks = self._tracks_for_playlist(last_playlist)
@@ -432,7 +432,6 @@ class MusicPlayer:
                 self._select_first_playlist()
                 last_track = None
 
-            # ---- Трек: только по пути ----
             idx = -1
             if last_track:
                 try:
@@ -450,7 +449,6 @@ class MusicPlayer:
                 self.current_index = -1
                 self._current_track_path = None
 
-            # ---- Shuffle ----
             if self._shuffle and self.tracks:
                 self._build_shuffle_order()
 
@@ -497,6 +495,12 @@ class MusicPlayer:
                 'waveform_points': self._waveform_points,
                 'playlist_limit': self._playlist_limit,
                 'resume_on_start': self._resume_on_start,
+
+                'visualizer_enabled': self._visualizer_enabled,
+                'visualizer_intensity': self._visualizer_intensity,
+                'visualizer_palette': self._visualizer_palette,
+
+                'position_offset_ms': self._position_offset_ms,
 
                 'updated_at': time.time(),
             }
@@ -665,10 +669,6 @@ class MusicPlayer:
     # ==================== ПОДГОТОВКА МЕДИА ====================
 
     def _prepare_media(self):
-        """
-        Готовит VLC к воспроизведению текущего трека без запуска.
-        Нужно при старте, чтобы play()/resume() сразу работали.
-        """
         if not self._current_track_path or not os.path.exists(self._current_track_path):
             return
         try:
@@ -745,24 +745,15 @@ class MusicPlayer:
             except Exception as e:
                 vlc_state = f"err: {e}"
 
-            try:
-                vlc_time = self.player.get_time()
-            except Exception as e:
-                vlc_time = f"err: {e}"
-
-            print(f"[PAUSE] py_is_playing={self.is_playing}, vlc_state={vlc_state}, vlc_time={vlc_time}, saved={self._saved_position:.4f}")
-
             if vlc_state == vlc.State.Playing:
                 self.player.pause()
                 self.is_playing = False
                 time.sleep(0.05)
                 ms = self.player.get_time()
                 d = self.get_duration_ms()
-                print(f"[PAUSE] after: ms={ms}, d={d}")
                 if d > 0 and ms is not None and ms >= 0:
                     self._saved_position = max(0.0, min(1.0, ms / d))
             else:
-                print(f"[PAUSE] not playing → resume")
                 return self.resume()
 
             self._save_state()
@@ -806,7 +797,6 @@ class MusicPlayer:
             self.is_playing = True
 
             if saved_ms > 0:
-                # Ждём Playing
                 deadline = time.time() + 2.0
                 while time.time() < deadline:
                     try:
@@ -816,7 +806,6 @@ class MusicPlayer:
                         pass
                     time.sleep(0.02)
 
-                # Пытаемся set_time без pause
                 for _ in range(5):
                     try:
                         self.player.set_time(saved_ms)
@@ -933,7 +922,6 @@ class MusicPlayer:
         return None
 
     def get_status(self):
-        # Лечим рассинхрон индекс/путь
         if self._current_track_path and self._current_track_path in self.tracks:
             real_idx = self.tracks.index(self._current_track_path)
             if real_idx != self.current_index:
@@ -1026,6 +1014,10 @@ class MusicPlayer:
             "waveform_points": self._waveform_points,
             "playlist_limit": self._playlist_limit,
             "resume_on_start": self._resume_on_start,
+            "visualizer_enabled": self._visualizer_enabled,
+            "visualizer_intensity": self._visualizer_intensity,
+            "visualizer_palette": self._visualizer_palette,
+            "position_offset_ms": self._position_offset_ms,
         }
 
     def save_settings(self, **kwargs):
@@ -1064,6 +1056,24 @@ class MusicPlayer:
         if 'resume_on_start' in kwargs and kwargs['resume_on_start'] is not None:
             self._resume_on_start = bool(kwargs['resume_on_start'])
 
+        if 'visualizer_enabled' in kwargs and kwargs['visualizer_enabled'] is not None:
+            self._visualizer_enabled = bool(kwargs['visualizer_enabled'])
+        if 'visualizer_intensity' in kwargs:
+            try:
+                v = float(kwargs['visualizer_intensity'])
+                if 0 <= v <= 2:
+                    self._visualizer_intensity = v
+            except (TypeError, ValueError):
+                pass
+        if 'visualizer_palette' in kwargs and kwargs['visualizer_palette'] in ('spectrum', 'warm', 'cool'):
+            self._visualizer_palette = kwargs['visualizer_palette']
+
+        if 'position_offset_ms' in kwargs:
+            try:
+                self._position_offset_ms = int(kwargs['position_offset_ms'])
+            except (TypeError, ValueError):
+                pass
+
         self._apply_eq()
         self._save_state(force=True)
         if self.update_callback:
@@ -1093,8 +1103,6 @@ class MusicPlayer:
         if self.update_callback:
             self.update_callback()
         return self.get_playlists_info()
-
-    # ==================== ЗАВЕРШЕНИЕ ====================
 
     def shutdown(self):
         self._meta_dirty = True

@@ -63,6 +63,43 @@ function scheduleRetry(callback) {
 }
 
 // ============================================================
+// ===== ТОСТ ДЛЯ OFFSET ======================================
+// ============================================================
+let offsetToastEl = null;
+let offsetToastTimer = null;
+
+window.showOffsetToast = function(ms) {
+    if (!offsetToastEl) {
+        offsetToastEl = document.createElement('div');
+        offsetToastEl.style.cssText = `
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 20, 37, 0.9);
+            backdrop-filter: blur(12px);
+            color: #d0d8ee;
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(124, 140, 255, 0.2);
+            font-size: 14px;
+            z-index: 10001;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        `;
+        document.body.appendChild(offsetToastEl);
+    }
+    const sign = ms > 0 ? '+' : '';
+    offsetToastEl.textContent = `Синхронизация: ${sign}${ms} мс`;
+    offsetToastEl.style.opacity = '1';
+
+    clearTimeout(offsetToastTimer);
+    offsetToastTimer = setTimeout(() => {
+        if (offsetToastEl) offsetToastEl.style.opacity = '0';
+    }, 1200);
+};
+
+// ============================================================
 // ===== БЕГУЩАЯ СТРОКА =======================================
 // ============================================================
 function setupMarquee(el) {
@@ -184,14 +221,16 @@ function loadWaveform(data) {
     if (!data || !data.waveform) {
         waveformData = [];
         waveformDuration = 0;
-        currentPosition = 0;   // ← добавить
+        currentPosition = 0;
         drawWaveform();
+        if (typeof Visualizer !== 'undefined') Visualizer.setWaveform(null);
         return;
     }
     waveformData = data.waveform;
     waveformDuration = data.duration;
-    currentPosition = 0;       // ← добавить
+    currentPosition = 0;
     drawWaveform();
+    if (typeof Visualizer !== 'undefined') Visualizer.setWaveform(data);
 }
 
 let lastKnownPosition = 0;
@@ -199,10 +238,10 @@ let lastStatusAt = 0;
 
 function updateProgress(position) {
     if (isDraggingWaveform) return;
-    // Если UI только что отправил запрос — не принимаем обновления
     if (playBusy) return;
     currentPosition = Math.max(0, Math.min(1, position));
     drawWaveform();
+    if (typeof Visualizer !== 'undefined') Visualizer.setPosition(currentPosition);
 }
 
 function drawWaveform() {
@@ -336,7 +375,6 @@ function formatTime(seconds) {
 // ============================================================
 function renderPlaylists(playlistsData, currentPlaylist) {
     const container = document.getElementById('playlistList');
-    console.log('[renderPlaylists]', playlistsData, currentPlaylist);
     if (!container) return;
     container.innerHTML = '';
 
@@ -346,7 +384,6 @@ function renderPlaylists(playlistsData, currentPlaylist) {
         return;
     }
 
-    // Сортируем: сначала обычные (по алфавиту), потом виртуальные (по алфавиту)
     const regular = names.filter(n => !playlistsData[n].is_virtual).sort((a, b) => a.localeCompare(b));
     const virtual = names.filter(n => playlistsData[n].is_virtual).sort((a, b) => a.localeCompare(b));
     const ordered = [...regular, ...virtual];
@@ -420,7 +457,6 @@ function renderTrackList(list, status) {
         if (index === status.index) li.classList.add('active');
         li.dataset.path = track.id;
 
-        // --- Обложка ---
         const cover = document.createElement('div');
         cover.className = 'track-cover';
         if (track.cover) {
@@ -433,12 +469,10 @@ function renderTrackList(list, status) {
             cover.innerHTML = '<span class="cover-placeholder">♪</span>';
         }
 
-        // --- Номер ---
         const indexSpan = document.createElement('span');
         indexSpan.className = 'track-index';
         indexSpan.textContent = index + 1;
 
-        // --- Инфо ---
         const infoWrapper = document.createElement('div');
         infoWrapper.className = 'track-info-list';
 
@@ -463,7 +497,6 @@ function renderTrackList(list, status) {
         infoWrapper.appendChild(titleWrap);
         if (parts.length) infoWrapper.appendChild(subSpan);
 
-        // --- Сердечко ---
         const favBtn = document.createElement('span');
         favBtn.className = 'track-fav' + (track.favorite ? ' active' : '');
         favBtn.textContent = track.favorite ? '♥' : '♡';
@@ -473,7 +506,6 @@ function renderTrackList(list, status) {
             toggleFavorite(track.id);
         };
 
-        // --- Крестик ---
         const deleteBtn = document.createElement('span');
         deleteBtn.className = 'track-delete';
         deleteBtn.textContent = '✕';
@@ -489,7 +521,12 @@ function renderTrackList(list, status) {
         li.appendChild(favBtn);
         li.appendChild(deleteBtn);
 
-        li.onclick = () => playTrack(index);
+        li.onclick = (e) => {
+            if (typeof Visualizer !== 'undefined') {
+                Visualizer.dropAt(e.clientX, e.clientY);
+            }
+            playTrack(index);
+        };
         li.oncontextmenu = (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -529,7 +566,6 @@ function startRename(path, spanEl) {
                 console.error(e);
             }
         }
-        // вернём span и перерисуем
         await loadStatus();
     };
 
@@ -597,7 +633,6 @@ function renderPlayer(status) {
         playBtn.title = 'Воспроизвести';
     }
 
-    // Shuffle / Repeat — стилизация как было, оставил без изменений логики
     const shuffleBtn = document.getElementById('shuffleBtn');
     const repeatBtn = document.getElementById('repeatBtn');
     const isLight = document.documentElement.getAttribute('data-theme') === 'light';
@@ -627,7 +662,6 @@ function renderPlayer(status) {
         repeatBtn.style.borderColor = isLight ? '#d0d0d0' : 'rgba(124,140,255,0.3)';
     }
 
-    // Тайминг
     const timeElement = document.getElementById('trackTime');
     if (timeElement) {
         const total = info.duration || waveformDuration || 0;
@@ -636,7 +670,12 @@ function renderPlayer(status) {
     }
 
     document.getElementById('trackCount').textContent = status.total || 0;
+
+    if (typeof Visualizer !== 'undefined') {
+        Visualizer.setPlaying(!!status.playing);
+    }
 }
+
 function applySettingsToUI(settings) {
     if (!settings) return;
     if (settings.accent) {
@@ -652,7 +691,21 @@ function applySettingsToUI(settings) {
     if (settings.cover_size) {
         document.body.setAttribute('data-cover-size', settings.cover_size);
     }
+    if (typeof Visualizer !== 'undefined') {
+        if (settings.visualizer_enabled !== undefined) {
+            Visualizer.setEnabled(settings.visualizer_enabled);
+        }
+        if (settings.visualizer_intensity !== undefined) {
+            Visualizer.setIntensity(settings.visualizer_intensity);
+        }
+        if (settings.visualizer_palette !== undefined) {
+            const hueShift = settings.visualizer_palette === 'warm' ? 0.05
+                           : settings.visualizer_palette === 'cool' ? 0.55 : 0.0;
+            Visualizer.setHueShift(hueShift);
+        }
+    }
 }
+
 // ============================================================
 // ===== ЗАГРУЗКА СТАТУСА =====================================
 // ============================================================
@@ -664,7 +717,6 @@ async function loadStatus() {
         applySettingsToUI(status.settings);
         renderPlayer(status);
 
-        // ← ВОТ ЭТУ СТРОКУ ДОБАВИТЬ
         renderPlaylists(status.playlists, status.playlist);
 
         const list = await api.call('get_playlist_tracks');
@@ -705,6 +757,9 @@ async function togglePlay() {
     if (!apiReady || playBusy) return;
     playBusy = true;
     try {
+        if (typeof Visualizer !== 'undefined') {
+            Visualizer.dropAt(window.innerWidth / 2, window.innerHeight / 2);
+        }
         await api.call('pause');
         await loadStatus();
     } catch (e) {
@@ -781,8 +836,6 @@ async function deleteTrackFromPlaylist(path, index) {
     if (!apiReady) return;
     if (!confirm('Удалить этот трек из плейлиста?')) return;
     try {
-        // Если плейлист виртуальный — удаление по индексу не сработает;
-        // там треки удаляются только через сердечко.
         const ok = await api.call('remove_from_playlist_by_path', currentStatus.playlist, path);
         if (ok) await loadStatus();
         else alert('Не удалось удалить трек (возможно, виртуальный плейлист).');
@@ -898,7 +951,6 @@ function setupDragAndDrop() {
                 return;
             }
 
-            // Fallback: файлы из dataTransfer
             const dt = e.dataTransfer;
             if (dt && dt.files && dt.files.length) {
                 const files = Array.from(dt.files);
@@ -946,6 +998,12 @@ document.addEventListener('keydown', (e) => {
         case 'r': case 'R': toggleRepeat(); break;
         case 'b': case 'B': toggleSidebar(); break;
         case 's': case 'S': toggleShuffle(); break;
+        case '[':
+            if (typeof window.__adjustOffset === 'function') window.__adjustOffset(-25);
+            break;
+        case ']':
+            if (typeof window.__adjustOffset === 'function') window.__adjustOffset(25);
+            break;
     }
 });
 
@@ -967,7 +1025,7 @@ function toggleSidebar() {
 // ============================================================
 // ===== КОНТЕКСТНОЕ МЕНЮ =====================================
 // ============================================================
-let ctxTarget = null; // { track, index, isVirtual }
+let ctxTarget = null;
 
 function openContextMenu(x, y, track, index, isVirtual) {
     const menu = document.getElementById('ctxMenu');
@@ -975,7 +1033,6 @@ function openContextMenu(x, y, track, index, isVirtual) {
 
     ctxTarget = { track, index, isVirtual };
 
-    // Обновляем текст и доступность пунктов
     menu.querySelector('[data-action="favorite"]').textContent =
         track.favorite ? '♡ Убрать из избранного' : '♥ В избранное';
 
@@ -985,7 +1042,6 @@ function openContextMenu(x, y, track, index, isVirtual) {
     const deleteItem = menu.querySelector('[data-action="delete"]');
 
     if (isVirtual) {
-        // В виртуальных плейлистах нельзя ни переименовывать трек, ни удалять его из списка
         renameItem.classList.add('disabled');
         artistItem.classList.add('disabled');
         albumItem.classList.add('disabled');
@@ -997,7 +1053,6 @@ function openContextMenu(x, y, track, index, isVirtual) {
         deleteItem.classList.remove('disabled');
     }
 
-    // Позиционируем с учётом краёв экрана
     menu.hidden = false;
     menu.style.left = '0px';
     menu.style.top = '0px';
@@ -1014,7 +1069,6 @@ function closeContextMenu() {
     ctxTarget = null;
 }
 
-// Обработчик кликов по пунктам меню
 document.addEventListener('click', (e) => {
     const item = e.target.closest('.ctx-item');
     if (!item) {
@@ -1048,9 +1102,7 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// Закрытие при клике в любом другом месте и по Escape
 document.addEventListener('contextmenu', (e) => {
-    // Если клик не по треку — закроем открытое меню
     if (!e.target.closest('.track-item')) closeContextMenu();
 });
 document.addEventListener('keydown', (e) => {
@@ -1067,7 +1119,6 @@ function promptRenameTrack(path, current) {
     if (value === null) return;
     const trimmed = value.trim();
     if (!trimmed) {
-        // Пусто → сброс кастомного названия, вернётся тег/имя файла
         api.call('reset_track_title', path).then(loadStatus).catch(console.error);
         return;
     }
@@ -1078,7 +1129,6 @@ function promptSetField(path, field, label, current) {
     const value = prompt(`${label}:`, current || '');
     if (value === null) return;
     const trimmed = value.trim();
-    // Пустая строка → сброс поля (вернётся значение из тега)
     api.call('set_track_meta', path, { [field]: trimmed || null })
         .then(loadStatus)
         .catch(console.error);
@@ -1093,7 +1143,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setupDragAndDrop();
         initWaveform();
 
-        // Применяем сохранённую тему
+        if (typeof Visualizer !== 'undefined') {
+            await Visualizer.init();
+        }
+
         try {
             const settings = await api.call('get_settings');
             if (settings && settings.theme && typeof window.switchTheme === 'function') {
@@ -1101,22 +1154,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {}
 
-        // Периодический опрос позиции
-setInterval(async () => {
-    if (!apiReady || playBusy) return;
-    try {
-        const status = await api.call('get_status');
-        currentStatus = status;
-        if (status.track_info && status.track_info.duration) {
-            const total = status.track_info.duration;
-            const timeEl = document.getElementById('trackTime');
-            if (timeEl) {
-                timeEl.textContent = `${formatTime(status.position * total)} / ${formatTime(total)}`;
-            }
-        }
-        updateProgress(status.position);
-    } catch (e) {}
-}, 1000);
+        // Периодический опрос статуса — только для тайминга, без updateProgress
+        setInterval(async () => {
+            if (!apiReady || playBusy) return;
+            try {
+                const status = await api.call('get_status');
+                currentStatus = status;
+                if (status.track_info && status.track_info.duration) {
+                    const total = status.track_info.duration;
+                    const timeEl = document.getElementById('trackTime');
+                    if (timeEl) {
+                        timeEl.textContent = `${formatTime(status.position * total)} / ${formatTime(total)}`;
+                    }
+                }
+            } catch (e) {}
+        }, 1000);
     });
 });
 
