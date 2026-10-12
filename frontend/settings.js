@@ -593,7 +593,7 @@
             <div class="setting-group">
                 <div class="about-block">
                     <div class="about-name">✦ Музыкальный плеер</div>
-                    <div class="about-version">Версия 4.0</div>
+                    <div class="about-version">Версия 3.2.1</div>
                 </div>
             </div>
 
