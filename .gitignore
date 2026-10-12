@@ -53,3 +53,7 @@ MusicPlayer-*.dmg
 *.swp
 *.swo
 *~
+
+# скрипты и логи
+build.sh
+*.log
