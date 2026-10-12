@@ -1,3 +1,5 @@
+# music_player.py
+
 import os
 import vlc
 import json
@@ -29,6 +31,108 @@ def is_audio_file(path):
     return Path(path).suffix.lower() in AUDIO_EXTENSIONS
 
 
+# ============================================================
+# ===== ТАЙМИНГИ И ЛОГ ======================================
+# ============================================================
+
+class SwitchLog:
+    def __init__(self, path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        self._session_start = None
+        self._session_label = None
+        self._fh = None
+        self._dirty = False
+        self._last_flush = 0.0
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._fh = open(self.path, 'w', encoding='utf-8')
+        except Exception as e:
+            print(f"[switch_log] не удалось открыть {self.path}: {e}")
+            self._fh = None
+
+    def _write(self, line):
+        with self._lock:
+            if self._fh:
+                try:
+                    self._fh.write(line + "\n")
+                    self._dirty = True
+                    now = time.time()
+                    if now - self._last_flush > 1.0:
+                        self._fh.flush()
+                        self._last_flush = now
+                except Exception:
+                    pass
+            print(line)
+
+    def session_start(self, label):
+        self._session_label = label
+        self._session_start = time.perf_counter()
+        self._write("")
+        self._write("=" * 70)
+        self._write(f"=== TRACK SWITCH START: {label} @ {datetime.now().strftime('%H:%M:%S.%f')[:-3]} ===")
+        self._write("=" * 70)
+
+    def step(self, label):
+        if self._session_start is None:
+            return
+        dt = (time.perf_counter() - self._session_start) * 1000.0
+        self._write(f"  [+{dt:7.1f} мс] {label}")
+
+    def session_end(self, extra=""):
+        if self._session_start is None:
+            return
+        dt = (time.perf_counter() - self._session_start) * 1000.0
+        self._write("-" * 70)
+        self._write(f"=== TRACK SWITCH END: total = {dt:.1f} мс {extra} ===")
+        self._write("-" * 70)
+        self._session_start = None
+        self._session_label = None
+
+    def flush(self):
+        with self._lock:
+            if self._fh and self._dirty:
+                try:
+                    self._fh.flush()
+                    self._dirty = False
+                except Exception:
+                    pass
+
+    def close(self):
+        with self._lock:
+            if self._fh:
+                try:
+                    self._fh.flush()
+                    self._fh.close()
+                except Exception:
+                    pass
+                self._fh = None
+
+
+_SWITCH_LOG = None
+
+
+def switch_log():
+    return _SWITCH_LOG
+
+
+class timed:
+    def __init__(self, label, threshold_ms=0.0):
+        self.label = label
+        self.threshold_ms = threshold_ms
+        self.t0 = None
+
+    def __enter__(self):
+        self.t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        dt_ms = (time.perf_counter() - self.t0) * 1000.0
+        if dt_ms >= self.threshold_ms:
+            print(f"[timing] {self.label}: {dt_ms:.1f} мс")
+        return False
+
+
 class MusicPlayer:
     def __init__(self, index_file="playlists.json", state_file="state.json",
                  metadata_file="metadata.json", base_dir=None):
@@ -43,8 +147,38 @@ class MusicPlayer:
 
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-        self.vlc_instance = vlc.Instance()
-        self.player = self.vlc_instance.media_player_new()
+        global _SWITCH_LOG
+        _SWITCH_LOG = SwitchLog(self.base_dir / "track_switch.log")
+
+        # Оптимизации libVLC: без статистики, меньший кэш, CoreAudio
+        self.vlc_instance = vlc.Instance([
+            '--no-video',
+            '--no-osd',
+            '--no-snapshot-preview',
+            '--no-stats',
+            '--file-caching=300',
+            '--network-caching=300',
+            '--sout-mux-caching=300',
+            '--audio-resampler=soxr',
+            '--aout=coreaudio',
+            '--quiet',
+        ])
+
+        # --- ДВА MediaPlayer ---
+        # Держим два плеера и переключаемся между ними.
+        # Это обходит тормоз libVLC при set_media на играющем плеере.
+        self.players = [
+            self.vlc_instance.media_player_new(),
+            self.vlc_instance.media_player_new(),
+        ]
+        self._active_player_idx = 0  # индекс текущего играющего плеера
+
+        # Применяем начальные настройки звука ко обоим
+        for p in self.players:
+            try:
+                p.audio_set_volume(70)
+            except Exception:
+                pass
 
         self.index_file = self.base_dir / index_file
         self.state_file = self.base_dir / state_file
@@ -58,6 +192,13 @@ class MusicPlayer:
         self.current_index = -1
         self._current_track_path = None
         self._saved_position = 0.0
+        self._last_play_at = time.time()
+        self._last_play_at = 0.0
+
+        # Предзагрузка следующего трека (media_new для свободного плеера)
+        self._next_media = None
+        self._next_track_path = None
+        self._preload_lock = threading.Lock()
 
         self.repeat_mode = 0
         self.is_playing = False
@@ -78,17 +219,18 @@ class MusicPlayer:
         self._playlist_limit = 1000
         self._resume_on_start = True
 
-        # Визуализатор
         self._visualizer_enabled = True
         self._visualizer_intensity = 1.0
         self._visualizer_palette = 'spectrum'
 
-        # Синхронизация позиции
         self._position_offset_ms = 0
+        self._plugins_disabled = []
 
         self.update_callback = None
-        self.event_manager = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._switching_track = False
+
+        self._public_track_path = None
 
         self.metadata = {}
         self._tag_cache = {}
@@ -110,8 +252,25 @@ class MusicPlayer:
         self._load_metadata()
         self._load_state()
         self._prepare_media()
+        self._schedule_preload_next()
+
+    # ==================== ПЛЕЕРЫ ====================
+
+    @property
+    def player(self):
+        """Текущий активный (играющий) плеер."""
+        return self.players[self._active_player_idx]
+
+    @property
+    def idle_player(self):
+        """Свободный плеер — на нём готовим следующий трек."""
+        return self.players[1 - self._active_player_idx]
+
+    # ==================== БАЗОВЫЕ ЧТЕНИЯ ====================
 
     def get_time_ms(self):
+        if self._switching_track:
+            return 0
         if self.is_playing and self.player:
             try:
                 t = self.player.get_time()
@@ -134,6 +293,8 @@ class MusicPlayer:
         return 0
 
     def get_duration_ms(self):
+        if self._switching_track:
+            return -1
         if self.player:
             try:
                 d = self.player.get_length()
@@ -418,6 +579,7 @@ class MusicPlayer:
             self._visualizer_palette = state.get('visualizer_palette', 'spectrum')
 
             self._position_offset_ms = int(state.get('position_offset_ms', 0))
+            self._plugins_disabled = list(state.get('plugins_disabled', []) or [])
 
             self._shuffle = state.get('shuffle', False)
             self._saved_position = state.get('saved_position', 0.0)
@@ -503,6 +665,7 @@ class MusicPlayer:
                 'position_offset_ms': self._position_offset_ms,
 
                 'updated_at': time.time(),
+                'plugins_disabled': self._plugins_disabled,
             }
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f, indent=2, ensure_ascii=False)
@@ -608,6 +771,7 @@ class MusicPlayer:
             self._save_state()
             if self.update_callback:
                 self.update_callback()
+            self._schedule_preload_next()
             return True
 
     def add_files_to_playlist(self, playlist_name, file_paths):
@@ -634,6 +798,7 @@ class MusicPlayer:
                 self._save_state()
                 if self.update_callback:
                     self.update_callback()
+                self._schedule_preload_next()
         return {"added": len(added), "files": added, "truncated": truncated}
 
     def remove_from_playlist(self, playlist_name, index):
@@ -674,67 +839,223 @@ class MusicPlayer:
         try:
             with self._lock:
                 media = self.vlc_instance.media_new(self._current_track_path)
-                self.player.set_media(media)
-                self._apply_eq()
-                if not self.event_manager:
-                    self.event_manager = self.player.event_manager()
-                    self.event_manager.event_attach(
-                        vlc.EventType.MediaPlayerEndReached,
-                        self._on_track_end
-                    )
+                self.idle_player.set_media(media)
+                self._apply_eq_to(self.idle_player)
+                # event_manager на обоих плеерах создаём один раз
+                self._attach_end_event(self.players[0])
+                self._attach_end_event(self.players[1])
         except Exception as e:
             print(f"prepare_media error: {e}")
 
-    # ==================== ВОСПРОИЗВЕДЕНИЕ ====================
+    def _attach_end_event(self, p):
+        try:
+            em = p.event_manager()
+            em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_track_end)
+        except Exception as e:
+            print(f"event_attach error: {e}")
 
-    def play(self, index=None):
-        self._clean_broken_tracks()
+    # ==================== ПРЕДЗАГРУЗКА СЛЕДУЮЩЕГО ====================
 
-        if self._is_virtual(self.current_playlist):
-            self.tracks = self._tracks_for_playlist(self.current_playlist)
+    def _get_next_index(self):
+        if not self.tracks:
+            return None
+        if self._shuffle and self._shuffle_order:
+            if self._shuffle_index < len(self._shuffle_order) - 1:
+                return self._shuffle_order[self._shuffle_index + 1]
+            return self._shuffle_order[0]
+        if self.current_index < len(self.tracks) - 1:
+            return self.current_index + 1
+        if self.repeat_mode == 2:
+            return 0
+        return None
 
-        if index is not None:
-            if 0 <= index < len(self.tracks):
-                self.current_index = index
-                self._current_track_path = self.tracks[index]
-            else:
+    def _schedule_preload_next(self):
+        next_idx = self._get_next_index()
+        if next_idx is None:
+            return
+        if not (0 <= next_idx < len(self.tracks)):
+            return
+        next_path = self.tracks[next_idx]
+        if not next_path or not os.path.exists(next_path):
+            return
+
+        with self._preload_lock:
+            if next_path == self._next_track_path:
+                return
+            self._next_track_path = next_path
+
+        def worker(path=next_path):
+            try:
+                t0 = time.perf_counter()
+                media = self.vlc_instance.media_new(path)
+                with self._preload_lock:
+                    if self._next_track_path == path:
+                        self._next_media = media
+                dt = (time.perf_counter() - t0) * 1000
+                log = switch_log()
+                if log:
+                    log.step(f"preload next '{Path(path).name}': {dt:.1f} мс")
+            except Exception as e:
+                print(f"preload error: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ==================== ВОСПРОИЗВЕДЕНИЕ (ДВОЙНОЙ ПЛЕЕР) ====================
+
+    def play(self, index=None, _source="play"):
+        log = switch_log()
+        label = f"{_source}(index={index})"
+        if log:
+            log.session_start(label)
+
+        self._switching_track = True
+        try:
+            if log:
+                log.step(f"start: current_index={self.current_index}, "
+                         f"current_path={Path(self._current_track_path).name if self._current_track_path else None}")
+
+            self._clean_broken_tracks()
+            if log:
+                log.step("_clean_broken_tracks done")
+
+            if self._is_virtual(self.current_playlist):
+                self.tracks = self._tracks_for_playlist(self.current_playlist)
+                if log:
+                    log.step(f"virtual playlist resolved: {len(self.tracks)} tracks")
+
+            if index is not None:
+                if 0 <= index < len(self.tracks):
+                    self.current_index = index
+                    self._current_track_path = self.tracks[index]
+                else:
+                    if log:
+                        log.step(f"ERROR: invalid index {index}")
+                        log.session_end("(invalid index)")
+                    return False
+
+            if self.current_index < 0 or not self.tracks:
+                if log:
+                    log.step("ERROR: no tracks / no current index")
+                    log.session_end("(no tracks)")
                 return False
 
-        if self.current_index < 0 or not self.tracks:
-            return False
+            track_path = self.tracks[self.current_index]
+            self._current_track_path = track_path
+            if log:
+                log.step(f"target track: {Path(track_path).name}")
 
-        track_path = self.tracks[self.current_index]
-        self._current_track_path = track_path
+            with self._lock:
+                if not os.path.exists(track_path):
+                    self._clean_broken_tracks()
+                    if log:
+                        log.step("ERROR: file not exists")
+                        log.session_end("(file not exists)")
+                    return False
 
-        with self._lock:
-            if not os.path.exists(track_path):
-                self._clean_broken_tracks()
-                return False
+                # ---- ДВОЙНОЙ ПЛЕЕР ----
+                # Готовим новый трек на СВОБОДНОМ плеере, потом переключаемся.
+                # Так set_media не блокируется на играющем плеере.
+                old_player = self.player         # тот, что сейчас играет
+                new_player_idx = 1 - self._active_player_idx
+                new_player = self.players[new_player_idx]
 
-            if self.player:
-                self.player.stop()
+                # 1. Освобождаем свободный плеер от старых ресурсов (быстро, т.к. не играет)
+                t0 = time.perf_counter()
+                try:
+                    if new_player.get_media() is not None:
+                        new_player.stop()
+                except Exception:
+                    pass
+                if log:
+                    log.step(f"clear idle player: {(time.perf_counter()-t0)*1000:.1f} мс")
 
-            media = self.vlc_instance.media_new(track_path)
-            self.player.set_media(media)
+                # 2. Берём предзагруженный media, если он есть
+                media = None
+                with self._preload_lock:
+                    if self._next_track_path == track_path and self._next_media is not None:
+                        media = self._next_media
+                        if log:
+                            log.step("использую предзагруженный media")
+                        self._next_media = None
+                        self._next_track_path = None
 
-            if not self.event_manager:
-                self.event_manager = self.player.event_manager()
-                self.event_manager.event_attach(
-                    vlc.EventType.MediaPlayerEndReached,
-                    self._on_track_end
-                )
+                if media is None:
+                    t0 = time.perf_counter()
+                    media = self.vlc_instance.media_new(track_path)
+                    if log:
+                        log.step(f"media_new: {(time.perf_counter()-t0)*1000:.1f} мс")
 
-            self._apply_eq()
-            self.player.play()
-            self.is_playing = True
-            self._saved_position = 0.0
+                # 3. Готовим новый трек на свободном плеере (он не играет — set_media мгновенный)
+                t0 = time.perf_counter()
+                new_player.set_media(media)
+                if log:
+                    log.step(f"set_media (idle): {(time.perf_counter()-t0)*1000:.1f} мс")
 
-            self._increment_play_count(track_path)
-            self._save_state()
+                # 4. Переносим громкость и EQ на новый плеер
+                try:
+                    new_player.audio_set_volume(self._get_current_volume())
+                except Exception:
+                    pass
+                self._apply_eq_to(new_player)
 
-            if self.update_callback:
-                self.update_callback()
-            return True
+                # 5. Запускаем новый трек
+                t0 = time.perf_counter()
+                new_player.play()
+                if log:
+                    log.step(f"new_player.play(): {(time.perf_counter()-t0)*1000:.1f} мс")
+
+                # 6. Теперь старый плеер можно остановить — это не критично по времени
+                t0 = time.perf_counter()
+                try:
+                    if old_player.get_media() is not None:
+                        old_player.stop()
+                except Exception:
+                    pass
+                if log:
+                    log.step(f"old_player.stop(): {(time.perf_counter()-t0)*1000:.1f} мс")
+
+                # 7. Переключаем "активного"
+                self._active_player_idx = new_player_idx
+                if log:
+                    log.step(f"active player -> {new_player_idx}")
+
+                self.is_playing = True
+                self._saved_position = 0.0
+                self._public_track_path = track_path
+
+                t0 = time.perf_counter()
+                self._increment_play_count(track_path)
+                if log:
+                    log.step(f"_increment_play_count: {(time.perf_counter()-t0)*1000:.1f} мс")
+
+                t0 = time.perf_counter()
+                self._save_state()
+                if log:
+                    log.step(f"_save_state: {(time.perf_counter()-t0)*1000:.1f} мс")
+
+                if self.update_callback:
+                    t0 = time.perf_counter()
+                    self.update_callback()
+                    if log:
+                        log.step(f"update_callback: {(time.perf_counter()-t0)*1000:.1f} мс")
+
+                if log:
+                    log.session_end("(OK)")
+
+                threading.Thread(target=self._schedule_preload_next, daemon=True).start()
+                return True
+        finally:
+            self._switching_track = False
+
+    def _get_current_volume(self):
+        for p in self.players:
+            try:
+                v = p.audio_get_volume()
+                if v and v > 0:
+                    return v
+            except Exception:
+                pass
+        return 70
 
     def pause(self):
         if not self.player:
@@ -760,47 +1081,63 @@ class MusicPlayer:
             return True
 
     def stop(self):
-        if self.player:
-            self.player.stop()
-            self.is_playing = False
-            self._saved_position = 0.0
-            self._save_state()
-            return True
-        return False
+        # Останавливаем оба плеера
+        for p in self.players:
+            try:
+                p.stop()
+            except Exception:
+                pass
+        self.is_playing = False
+        self._saved_position = 0.0
+        self._public_track_path = None
+        self._save_state()
+        return True
 
     def resume(self):
         if not self._current_track_path or not os.path.exists(self._current_track_path):
             return False
         with self._lock:
-            current_media = None
-            try:
-                current_media = self.player.get_media()
-            except Exception:
-                current_media = None
+            # Готовим трек на свободном плеере, потом переключаемся
+            old_player = self.player
+            new_player_idx = 1 - self._active_player_idx
+            new_player = self.players[new_player_idx]
 
-            if current_media is None:
-                media = self.vlc_instance.media_new(self._current_track_path)
-                self.player.set_media(media)
-                self._apply_eq()
+            try:
+                if new_player.get_media() is not None:
+                    new_player.stop()
+            except Exception:
+                pass
+
+            media = self.vlc_instance.media_new(self._current_track_path)
+            new_player.set_media(media)
+
+            try:
+                new_player.audio_set_volume(self._get_current_volume())
+            except Exception:
+                pass
+            self._apply_eq_to(new_player)
 
             duration = self.get_duration_ms()
-            if duration <= 0:
-                for _ in range(10):
-                    time.sleep(0.05)
-                    duration = self.get_duration_ms()
-                    if duration > 0:
-                        break
-
             saved_ms = int(self._saved_position * duration) if duration > 0 and self._saved_position > 0 else 0
 
-            self.player.play()
+            new_player.play()
+
+            # Останавливаем старый
+            try:
+                if old_player.get_media() is not None:
+                    old_player.stop()
+            except Exception:
+                pass
+
+            self._active_player_idx = new_player_idx
             self.is_playing = True
+            self._public_track_path = self._current_track_path
 
             if saved_ms > 0:
                 deadline = time.time() + 2.0
                 while time.time() < deadline:
                     try:
-                        if self.player.get_state() == vlc.State.Playing:
+                        if new_player.get_state() == vlc.State.Playing:
                             break
                     except Exception:
                         pass
@@ -808,12 +1145,12 @@ class MusicPlayer:
 
                 for _ in range(5):
                     try:
-                        self.player.set_time(saved_ms)
+                        new_player.set_time(saved_ms)
                     except Exception:
                         pass
                     time.sleep(0.03)
                     try:
-                        real = self.player.get_time()
+                        real = new_player.get_time()
                         if real is not None and abs(real - saved_ms) < 500:
                             break
                     except Exception:
@@ -834,7 +1171,7 @@ class MusicPlayer:
                 self.current_index = self._shuffle_order[0]
         else:
             self.current_index = (self.current_index + 1) % len(self.tracks)
-        return self.play(self.current_index)
+        return self.play(self.current_index, _source="next")
 
     def previous(self):
         if not self.tracks:
@@ -848,7 +1185,7 @@ class MusicPlayer:
                 self.current_index = self._shuffle_order[-1]
         else:
             self.current_index = (self.current_index - 1) % len(self.tracks)
-        return self.play(self.current_index)
+        return self.play(self.current_index, _source="previous")
 
     def shuffle(self):
         self._shuffle = not self._shuffle
@@ -882,7 +1219,11 @@ class MusicPlayer:
     def set_volume(self, volume):
         if self.player:
             volume = max(0, min(100, volume))
-            self.player.audio_set_volume(volume)
+            for p in self.players:
+                try:
+                    p.audio_set_volume(volume)
+                except Exception:
+                    pass
             return volume
         return 0
 
@@ -897,6 +1238,8 @@ class MusicPlayer:
         return 50
 
     def get_position(self):
+        if self._switching_track:
+            return self._saved_position
         ms = self.get_time_ms()
         d = self.get_duration_ms()
         if d > 0 and ms >= 0:
@@ -906,6 +1249,11 @@ class MusicPlayer:
     def get_current_track(self):
         if 0 <= self.current_index < len(self.tracks):
             return Path(self.tracks[self.current_index]).stem
+        return None
+
+    def get_current_track_path(self):
+        if 0 <= self.current_index < len(self.tracks):
+            return self.tracks[self.current_index]
         return None
 
     def get_current_track_info(self):
@@ -984,7 +1332,7 @@ class MusicPlayer:
     def _play_next(self):
         time.sleep(0.1)
         if self.repeat_mode == 1:
-            self.play(self.current_index)
+            self.play(self.current_index, _source="_play_next/repeat1")
         elif self.repeat_mode == 2:
             self.next()
         else:
@@ -1018,17 +1366,24 @@ class MusicPlayer:
             "visualizer_intensity": self._visualizer_intensity,
             "visualizer_palette": self._visualizer_palette,
             "position_offset_ms": self._position_offset_ms,
+            "plugins_disabled": list(self._plugins_disabled),
         }
 
     def save_settings(self, **kwargs):
+        eq_changed = False
+
         if 'theme' in kwargs and kwargs['theme'] is not None:
             self._theme = kwargs['theme']
         if 'eq_enabled' in kwargs and kwargs['eq_enabled'] is not None:
-            self._eq_enabled = bool(kwargs['eq_enabled'])
+            new_val = bool(kwargs['eq_enabled'])
+            if new_val != self._eq_enabled:
+                self._eq_enabled = new_val
+                eq_changed = True
         if 'eq_values' in kwargs and kwargs['eq_values'] is not None:
             vals = list(kwargs['eq_values'])
             if len(vals) == 10:
                 self._eq_values = vals
+                eq_changed = True
         if 'accent' in kwargs and kwargs['accent']:
             self._accent = kwargs['accent']
         if 'cover_size' in kwargs and kwargs['cover_size'] in ('small', 'medium', 'large'):
@@ -1074,18 +1429,29 @@ class MusicPlayer:
             except (TypeError, ValueError):
                 pass
 
-        self._apply_eq()
+        if 'plugins_disabled' in kwargs and isinstance(kwargs['plugins_disabled'], list):
+            self._plugins_disabled = [str(x) for x in kwargs['plugins_disabled']]
+
+        # Применяем EQ к ОБОИМ плеерам, если настройки изменились
+        if eq_changed:
+            for p in self.players:
+                self._apply_eq_to(p)
+
         self._save_state(force=True)
         if self.update_callback:
             self.update_callback()
         return True
 
     def _apply_eq(self):
-        if not self.player:
+        """Применяем EQ к активному плееру (для совместимости)."""
+        self._apply_eq_to(self.player)
+
+    def _apply_eq_to(self, p):
+        if not p:
             return
         if not self._eq_enabled:
             try:
-                self.player.set_equalizer(None)
+                p.set_equalizer(None)
             except Exception as e:
                 print(f"❌ Ошибка отключения EQ: {e}")
             return
@@ -1094,7 +1460,7 @@ class MusicPlayer:
             for i in range(10):
                 value = max(-20.0, min(20.0, self._eq_values[i]))
                 eq.set_amp_at_index(value, i)
-            self.player.set_equalizer(eq)
+            p.set_equalizer(eq)
         except Exception as e:
             print(f"❌ Ошибка EQ: {e}")
 
@@ -1108,3 +1474,11 @@ class MusicPlayer:
         self._meta_dirty = True
         self._save_metadata(force=True)
         self._save_state(force=True)
+        for p in self.players:
+            try:
+                p.stop()
+            except Exception:
+                pass
+        log = switch_log()
+        if log:
+            log.close()
