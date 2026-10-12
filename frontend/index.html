@@ -7,11 +7,11 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="settings.css">
     <script>
-	(function() {
-		const params = new URLSearchParams(window.location.search);
-		const theme = params.get('theme') || 'dark';
-		document.documentElement.setAttribute('data-theme', theme);
-	})();
+    (function() {
+        const params = new URLSearchParams(window.location.search);
+        const theme = params.get('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+    })();
     </script>
     <style>
         :root { --accent: #7c8cff; }
@@ -36,6 +36,10 @@
                     <span id="trackCount">0</span> треков
                 </span>
             </div>
+
+            <!-- Слот: header -->
+            <div id="plugin-slot-header" class="plugin-slot plugin-slot-header"></div>
+
             <button class="add-btn-header" onclick="openFileDialog()" title="Добавить аудио">
                 ＋
             </button>
@@ -53,13 +57,22 @@
                     </ul>
                 </div>
                 <button class="add-playlist-btn" onclick="showModal()">＋ Добавить плейлист</button>
+
+                <!-- Слот: sidebar -->
+                <div id="plugin-slot-sidebar" class="plugin-slot plugin-slot-sidebar"></div>
             </aside>
 
             <main class="content">
-                <div class="playlist-view" id="dropZone">
-                    <ul id="trackList">
-                        <li class="track-item empty">Перетащи трек или директорию сюда</li>
-                    </ul>
+                <!-- Обёртка для списка треков и слота content -->
+                <div class="playlist-area">
+                    <div class="playlist-view" id="dropZone">
+                        <ul id="trackList">
+                            <li class="track-item empty">Перетащи трек или директорию сюда</li>
+                        </ul>
+                    </div>
+
+                    <!-- Слот: content (растягивается только на область списка треков) -->
+                    <div id="plugin-slot-content" class="plugin-slot plugin-slot-content"></div>
                 </div>
 
                 <div class="player-panel">
@@ -94,6 +107,9 @@
                                 <button class="ctrl-btn" id="repeatBtn" onclick="toggleRepeat()" title="Повтор">🔁</button>
                                 <button class="ctrl-btn fav-btn" id="favBtn" onclick="toggleCurrentFavorite()" title="В избранное">♡</button>
                             </div>
+
+                            <!-- Слот: player -->
+                            <div id="plugin-slot-player" class="plugin-slot plugin-slot-player"></div>
                         </div>
 
                         <div class="player-right">
@@ -106,6 +122,12 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Слот: fullscreen (для плагинов на весь экран) -->
+                <div id="plugin-slot-fullscreen" class="plugin-slot plugin-slot-fullscreen"></div>
+
+                <!-- Слот: overlay (поверх всего контента) -->
+                <div id="plugin-slot-overlay" class="plugin-slot plugin-slot-overlay"></div>
             </main>
         </div>
     </div>
@@ -131,8 +153,10 @@
         <div class="ctx-item ctx-danger" data-action="delete">🗑 Удалить из плейлиста</div>
     </div>
 
+    <script src="api.js"></script>
     <script src="settings.js"></script>
     <script src="visualizer.js"></script>
+    <script src="plugins.js"></script>
     <script src="main.js"></script>
 </body>
 </html>
