@@ -189,7 +189,7 @@ header {
 	justify-content: center;
 }
 
-.add-btn-header:hover {
+.add-btn-header:hover {                
 	background: var(--bg-hover);
 }
 
@@ -1196,4 +1196,146 @@ body[data-cover-size="small"] .track-item {
 
 body[data-cover-size="large"] .track-item {
 	padding: 10px 10px;
+}
+
+/* ============================================================
+   PLUGIN SLOTS — контейнеры для плагинов
+   ============================================================ */
+
+.plugin-slot {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;   /* сами слоты не перехватывают клики */
+}
+
+.plugin-slot .plugin-root {
+    pointer-events: auto;   /* а плагины внутри — перехватывают */
+}
+
+/* --- HEADER: справа от счётчика, перед кнопками --- */
+.plugin-slot-header {
+    display: flex;
+    align-items: center;
+    gap: 0px;
+	margin: 8px;
+    pointer-events: auto;   /* ← важно */
+    position: relative;      /* ← важно */
+    z-index: 1;              /* ← важно */
+}
+
+.plugin-slot-header .plugin-root {
+    display: flex;
+    align-items: center;
+}
+
+/* --- SIDEBAR: снизу сайдбара --- */
+.plugin-slot-sidebar {
+    margin-top: 8px;
+}
+
+.plugin-slot-sidebar .plugin-root {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* --- PLAYER: под контролами --- */
+.plugin-slot-player {
+    margin-top: 8px;
+}
+
+/* --- OVERLAY: поверх контента, справа сверху --- */
+.plugin-slot-overlay {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    width: 320px;
+    max-width: calc(100% - 32px);
+    z-index: 100;
+}
+
+.plugin-slot-overlay .plugin-root {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* На узких экранах overlay сжимается */
+@media (max-width: 900px) {
+    .plugin-slot-overlay {
+        width: 240px;
+    }
+}
+
+.plugin-slot-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    display: none;              /* ← вот это */
+    pointer-events: none;
+}
+
+.plugin-slot-fullscreen.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    background: transparent;
+}
+.content {
+    position: relative;   /* нужно для absolute-слота */
+}
+
+.plugin-slot-content {
+    position: absolute;
+    inset: 0;
+    display: none;
+    z-index: 10;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.plugin-slot-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.plugin-slot-content .plugin-root {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ============================================================
+   Обёртка для списка треков и слота content
+   ============================================================ */
+.playlist-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Слот content — растягивается на всю .playlist-area,
+   но не заезжает на .player-panel */
+.plugin-slot-content {
+    position: absolute;
+    inset: 0;
+    display: none;
+    z-index: 10;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.plugin-slot-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.plugin-slot-content .plugin-root {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }

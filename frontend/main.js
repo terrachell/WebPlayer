@@ -1,3 +1,5 @@
+// frontend/main.js
+
 // ============================================================
 // ===== АДАПТЕР API ==========================================
 // ============================================================
@@ -41,13 +43,20 @@ let editingTrackPath = null;
 function waitForApi(callback) {
     if (isWebview() && typeof window.pywebview.api.ready === 'function') {
         window.pywebview.api.ready().then((result) => {
-            if (result === true) {
+            // принимаем любой не-falsy ответ
+            if (result && (result === true || result.ok === true || result === 'true')) {
                 apiReady = true;
+                window.apiReady = true;  // <-- синхронизируем глобальный флаг
+                console.log('[main] API ready:', result);
                 callback();
             } else {
+                console.warn('[main] ready() вернул:', result, '— retry');
                 scheduleRetry(callback);
             }
-        }).catch(() => scheduleRetry(callback));
+        }).catch((e) => {
+            console.warn('[main] ready() error:', e);
+            scheduleRetry(callback);
+        });
     } else {
         scheduleRetry(callback);
     }
@@ -216,12 +225,16 @@ function resizeWaveform() {
     ctx.scale(dpr, dpr);
     drawWaveform();
 }
+let _lastTimeText = '';
+let _lastPositionSent = -1;
 
 function loadWaveform(data) {
     if (!data || !data.waveform) {
         waveformData = [];
         waveformDuration = 0;
         currentPosition = 0;
+        _lastPositionSent = -1;
+        _lastTimeText = '';
         drawWaveform();
         if (typeof Visualizer !== 'undefined') Visualizer.setWaveform(null);
         return;
@@ -229,6 +242,8 @@ function loadWaveform(data) {
     waveformData = data.waveform;
     waveformDuration = data.duration;
     currentPosition = 0;
+    _lastPositionSent = -1;
+    _lastTimeText = '';
     drawWaveform();
     if (typeof Visualizer !== 'undefined') Visualizer.setWaveform(data);
 }
@@ -236,12 +251,36 @@ function loadWaveform(data) {
 let lastKnownPosition = 0;
 let lastStatusAt = 0;
 
+
+
 function updateProgress(position) {
     if (isDraggingWaveform) return;
     if (playBusy) return;
-    currentPosition = Math.max(0, Math.min(1, position));
-    drawWaveform();
-    if (typeof Visualizer !== 'undefined') Visualizer.setPosition(currentPosition);
+
+    const posChanged = Math.abs(position - _lastPositionSent) > 0.0005;
+    if (posChanged) {
+        _lastPositionSent = position;
+        currentPosition = Math.max(0, Math.min(1, position));
+        drawWaveform();
+        if (typeof Visualizer !== 'undefined') Visualizer.setPosition(currentPosition);
+    }
+
+    if (window.WebPlayer && window.WebPlayer.emit) {
+        window.WebPlayer.emit('player:tick', currentPosition);
+    }
+
+    // Время обновляем почаще — раз в ~250 мс (когда позиция меняется заметно)
+    // или когда предыдущее значение времени ещё не выставлялось.
+    if (waveformDuration > 0) {
+        const timeEl = document.getElementById('trackTime');
+        if (timeEl) {
+            const newText = `${formatTime(currentPosition * waveformDuration)} / ${formatTime(waveformDuration)}`;
+            if (newText !== _lastTimeText) {
+                _lastTimeText = newText;
+                timeEl.textContent = newText;
+            }
+        }
+    }
 }
 
 function drawWaveform() {
@@ -339,10 +378,12 @@ function doSeek(e) {
     currentPosition = x;
     drawWaveform();
     if (waveformDuration > 0) {
-        const timeElement = document.getElementById('trackTime');
-        if (timeElement) {
-            timeElement.textContent = `${formatTime(currentPosition * waveformDuration)} / ${formatTime(waveformDuration)}`;
-        }
+const timeElement = document.getElementById('trackTime');
+if (timeElement && !waveformDuration) {
+    const total = info.duration || 0;
+    const pos = status.position * total;
+    timeElement.textContent = `${formatTime(pos)} / ${formatTime(total)}`;
+}
     }
 }
 
@@ -727,6 +768,11 @@ async function loadStatus() {
         if (volSlider && document.activeElement !== volSlider) {
             volSlider.value = status.volume;
             volValue.textContent = status.volume + '%';
+        }
+
+        // emit ОДИН РАЗ
+        if (window.WebPlayer && window.WebPlayer.emit) {
+            window.WebPlayer.emit('player:update', status);
         }
     } catch (e) {
         console.error('loadStatus error:', e);
@@ -1154,21 +1200,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {}
 
-        // Периодический опрос статуса — только для тайминга, без updateProgress
-        setInterval(async () => {
-            if (!apiReady || playBusy) return;
-            try {
-                const status = await api.call('get_status');
-                currentStatus = status;
-                if (status.track_info && status.track_info.duration) {
-                    const total = status.track_info.duration;
-                    const timeEl = document.getElementById('trackTime');
-                    if (timeEl) {
-                        timeEl.textContent = `${formatTime(status.position * total)} / ${formatTime(total)}`;
-                    }
-                }
-            } catch (e) {}
-        }, 1000);
+        if (window.WebPlayer && window.WebPlayer.loadAllPlugins) {
+            window.WebPlayer.loadAllPlugins();
+        }
+
+        // ❌ УБРАНО: setInterval, дублирующий Python-цикл.
+        // Прогресс обновляется через updateProgress() из Python.
     });
 });
 

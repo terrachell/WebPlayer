@@ -21,14 +21,12 @@
     };
 
     const ACCENTS = [
-        // Универсальные — хорошо смотрятся в обеих темах
         { name: 'Индиго',    value: '#7c8cff' },
         { name: 'Мята',      value: '#4ade80' },
         { name: 'Роза',      value: '#f472b6' },
         { name: 'Янтарь',    value: '#fbbf24' },
         { name: 'Лазурь',    value: '#22d3ee' },
         { name: 'Сирень',    value: '#a78bfa' },
-        // Для светлой темы — тёмные, приглушённые
         { name: 'Океан',     value: '#2563eb' },
         { name: 'Изумруд',   value: '#059669' },
         { name: 'Вино',      value: '#be123c' },
@@ -42,6 +40,7 @@
         { id: 'player',     icon: '▶️', label: 'Плеер' },
         { id: 'visualizer', icon: '✨', label: 'Визуализатор' },
         { id: 'equalizer',  icon: '🎚', label: 'Эквалайзер' },
+        { id: 'plugins',    icon: '🧩', label: 'Плагины' },
         { id: 'library',    icon: '📚', label: 'Библиотека' },
         { id: 'about',      icon: 'ℹ️', label: 'О программе' },
     ];
@@ -51,6 +50,7 @@
     // ============================================================
     let overlay = null;
     let activeSection = 'appearance';
+    let pluginsCache = [];      // [{ id, manifest, enabled }]
 
     const state = {
         theme: 'dark',
@@ -68,17 +68,15 @@
         visualizer_intensity: 1.0,
         visualizer_palette: 'spectrum',
         position_offset_ms: 0,
+        plugins_disabled: [],
     };
 
     // ============================================================
     // ===== API-АДАПТЕР ==========================================
     // ============================================================
-    async function apiCall(method, ...args) {
-        if (typeof window.pywebview !== 'undefined' && window.pywebview.api) {
-            return await window.pywebview.api[method](...args);
-        }
-        throw new Error('API недоступен');
-    }
+	async function apiCall(method, ...args) {
+		return await window.api.call(method, ...args);
+	}
 
     async function saveToAPI() {
         try {
@@ -130,10 +128,6 @@
         return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
     }
 
-    /**
-     * Корректирует акцентный цвет под текущую тему.
-     * В светлой теме яркие цвета притемняются, чтобы текст читался.
-     */
     function adjustAccentForTheme(hex, theme) {
         if (theme !== 'light') return hex;
 
@@ -143,12 +137,9 @@
         const { h, s, l } = rgbToHsl(rgb.r, rgb.g, rgb.b);
 
         let newL = l;
-        // Если цвет слишком светлый — притемняем
         if (l > 0.55) newL = 0.45;
-        // Если слишком тёмный — чуть осветляем
         if (l < 0.25) newL = 0.35;
 
-        // Немного повышаем насыщенность для «сочности»
         const newS = Math.min(1, s * 1.1);
 
         return hslToHex(h, newS, newL);
@@ -213,6 +204,7 @@
             case 'player':     renderPlayer(content); break;
             case 'visualizer': renderVisualizer(content); break;
             case 'equalizer':  renderEqualizer(content); break;
+            case 'plugins':    renderPlugins(content); break;
             case 'library':    renderLibrary(content); break;
             case 'about':      renderAbout(content); break;
         }
@@ -493,6 +485,60 @@
         });
     }
 
+    // ---------- Плагины ----------
+    async function renderPlugins(root) {
+        root.innerHTML = `
+            <h2>🧩 Плагины</h2>
+            <div class="setting-group">
+                <div class="setting-label">Установленные плагины</div>
+                <div class="plugins-list" id="pluginsList">
+                    <div class="empty-hint">Загрузка...</div>
+                </div>
+                <div class="setting-hint">
+                    Плагины — это папки в <code>plugins/</code>. Включение и выключение применяется сразу, без перезапуска плеера.
+                </div>
+            </div>
+        `;
+
+        try {
+            const list = await apiCall('get_plugins');
+            pluginsCache = list || [];
+        } catch (e) {
+            console.error('get_plugins error:', e);
+            pluginsCache = [];
+        }
+
+        const listEl = document.getElementById('pluginsList');
+        if (!listEl) return;
+
+        if (!pluginsCache.length) {
+            listEl.innerHTML = '<div class="empty-hint">Плагины не найдены</div>';
+            return;
+        }
+
+        listEl.innerHTML = pluginsCache.map(p => {
+            const m = p.manifest || {};
+            const name = m.name || p.id;
+            const version = m.version || '?';
+            const author = m.author || '—';
+            const desc = m.description || '';
+            return `
+                <div class="plugin-item" data-plugin-id="${p.id}">
+                    <div class="plugin-info">
+                        <div class="plugin-name">${name} <span class="plugin-version">v${version}</span></div>
+                        <div class="plugin-author">${author}</div>
+                        ${desc ? `<div class="plugin-desc">${desc}</div>` : ''}
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${p.enabled ? 'checked' : ''}
+                               onchange="window.__togglePlugin('${p.id}', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            `;
+        }).join('');
+    }
+
     // ---------- Библиотека ----------
     function renderLibrary(root) {
         root.innerHTML = `
@@ -581,7 +627,6 @@
         } else {
             document.documentElement.setAttribute('data-theme', theme);
         }
-        // Переприменяем акцент с учётом новой темы
         applyAccent(state.accent);
 
         document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -622,9 +667,6 @@
 
     window.__setWaveformPoints = function(points) {
         state.waveform_points = points;
-        document.querySelectorAll('.segmented .seg-btn').forEach(el => {
-            if (el.textContent.trim() === String(points)) el.classList.add('active');
-        });
         renderSection('player');
         saveToAPI();
     };
@@ -755,6 +797,36 @@
         }
     };
 
+    // ---------- Плагины ----------
+    window.__togglePlugin = async function(pluginId, enabled) {
+        try {
+            const ok = await apiCall('set_plugin_enabled', pluginId, enabled);
+            if (!ok) {
+                alert('Не удалось сохранить состояние плагина');
+                return;
+            }
+
+            // Обновляем локальный кеш
+            const item = pluginsCache.find(p => p.id === pluginId);
+            if (item) item.enabled = enabled;
+
+            // Управляем DOM плагина
+            if (enabled) {
+                if (window.WebPlayer && window.WebPlayer.enablePlugin) {
+                    await window.WebPlayer.enablePlugin(pluginId);
+                }
+            } else {
+                if (window.WebPlayer && window.WebPlayer.disablePlugin) {
+                    window.WebPlayer.disablePlugin(pluginId);
+                }
+            }
+        } catch (e) {
+            console.error('set_plugin_enabled error:', e);
+            alert('Ошибка: ' + e.message);
+        }
+    };
+
+    // ---------- Сброс ----------
     window.__resetAllSettings = async function() {
         if (!confirm('Сбросить ВСЕ настройки? Это не затронет плейлисты и метаданные.')) return;
 
@@ -773,6 +845,7 @@
         state.visualizer_intensity = 1.0;
         state.visualizer_palette = 'spectrum';
         state.position_offset_ms = 0;
+        state.plugins_disabled = [];
 
         applyAccent(state.accent);
         applyCoverSize(state.cover_size);
@@ -792,7 +865,6 @@
     // ===== ОТКРЫТИЕ / ЗАКРЫТИЕ ==================================
     // ============================================================
     window.openSettings = async function() {
-        // Проверяем, есть ли оверлей в DOM
         if (document.getElementById('settingsOverlay')) return;
 
         try {
@@ -805,6 +877,9 @@
                 }
                 if (typeof state.position_offset_ms !== 'number') {
                     state.position_offset_ms = 0;
+                }
+                if (!Array.isArray(state.plugins_disabled)) {
+                    state.plugins_disabled = [];
                 }
             }
         } catch (e) {
