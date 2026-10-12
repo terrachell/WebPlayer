@@ -1,4 +1,7 @@
+# app.py
+
 import os
+import sys
 import platform
 import json
 import threading
@@ -8,48 +11,170 @@ import subprocess
 import socket
 from pathlib import Path
 
-import webview
-import http.server
-import socketserver
+# ============================================================
+# 1. VLC: настраиваем ДО всего, что импортирует vlc
+# ============================================================
+from vlc_loader import setup as setup_vlc
 
-# =========================
-# ===== ТОЛЬКО macOS ======
-# =========================
+_vlc_ok = setup_vlc()
+if not _vlc_ok:
+    print("⚠️  VLC не найден.")
+    print("    Установите VLC: https://www.videolan.org/vlc/")
+    print("    Или используйте собранный .dmg (VLC встроен).")
 
-# ffmpeg
-_FFMPEG_PATHS = [
-    '/usr/local/bin/ffmpeg',
+# ============================================================
+# 2. ffmpeg: ищем в системе и в бандле
+# ============================================================
+_FFMPEG_PATHS = []
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    _FFMPEG_PATHS.append(str(Path(sys._MEIPASS) / "ffmpeg"))
+_FFMPEG_PATHS += [
     '/opt/homebrew/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
     '/usr/bin/ffmpeg',
 ]
 for _path in _FFMPEG_PATHS:
     if os.path.exists(_path):
         os.environ['PATH'] = os.path.dirname(_path) + ':' + os.environ.get('PATH', '')
+        print(f"✅ ffmpeg: {_path}")
         break
 
-# VLC libs (cask, brew formula, вручную)
-_VLC_LIB_CANDIDATES = [
-    '/Applications/VLC.app/Contents/MacOS/lib',
-    '/opt/homebrew/lib',
-    '/usr/local/lib',
-]
-for _p in _VLC_LIB_CANDIDATES:
-    if os.path.exists(os.path.join(_p, 'libvlc.dylib')) or \
-       os.path.exists(os.path.join(_p, 'libvlc.5.dylib')):
-        os.environ['DYLD_LIBRARY_PATH'] = _p + ':' + os.environ.get('DYLD_LIBRARY_PATH', '')
-        print(f"✅ VLC libs: {_p}")
-        break
+import webview
+import http.server
+import socketserver
 
 from music_player import MusicPlayer, AUDIO_EXTENSIONS, is_audio_file
 
+# ... дальше всё как было
+
 
 # ============================================================
-# ===== HTTP СЕРВЕР: frontend + covers ======================
+# ПЛАГИНЫ
+# ============================================================
+
+class PluginApi:
+    """
+    Ограниченный API, который видит плагин.
+    Никакого os.system, open(), subprocess.
+    Только чтение состояния плеера.
+    """
+    def __init__(self, player, plugin_id: str):
+        self._player = player
+        self._plugin_id = plugin_id
+
+    def get_status(self):
+        return self._player.get_status()
+
+    def get_position(self):
+        return self._player.get_position()
+
+    def get_current_track(self):
+        return self._player.get_current_track()
+
+    def get_current_track_path(self):
+        return self._player._public_track_path
+
+    def read_file_next_to_track(self, extension: str, mode: str = 'text'):
+        track_path = self._player.get_current_track_path()
+        if not track_path:
+            return None
+        file_path = Path(track_path).with_suffix(extension)
+        if not file_path.exists():
+            return None
+        print(f"[lyrics-debug] looking for: {file_path}, exists={file_path.exists()}")
+        try:
+            if mode == 'text':
+                return file_path.read_text(encoding='utf-8')
+            if mode == 'base64':
+                return base64.b64encode(file_path.read_bytes()).decode('ascii')
+            return None
+        except Exception as e:
+            print(f"❌ [plugin:{self._plugin_id}] read_file_next_to_track({extension}, {mode}): {e}")
+            return None
+
+    def log(self, message: str):
+        print(f"[plugin:{self._plugin_id}] {message}")
+
+
+class PluginLoader:
+    def __init__(self, plugins_dir: Path, player):
+        self.plugins_dir = plugins_dir
+        self.player = player
+        self.plugins = {}
+        self._load_all()
+
+    def _load_all(self):
+        if not self.plugins_dir.exists():
+            print(f"ℹ️  Папка плагинов не найдена: {self.plugins_dir}")
+            return
+
+        for folder in sorted(self.plugins_dir.iterdir()):
+            if not folder.is_dir():
+                continue
+            manifest_path = folder / "manifest.json"
+            if not manifest_path.exists():
+                continue
+            try:
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                pid = data["id"]
+                self.plugins[pid] = {
+                    "manifest": data,
+                    "path": folder,
+                    "api": PluginApi(self.player, pid),
+                }
+                print(f"✅ Плагин загружен: {pid} v{data.get('version', '?')}")
+            except Exception as e:
+                print(f"❌ Плагин {folder.name} не загружен: {e}")
+
+    def _is_enabled(self, plugin_id: str) -> bool:
+        try:
+            settings = self.player.get_settings() or {}
+            disabled = settings.get('plugins_disabled') or []
+            return plugin_id not in disabled
+        except Exception:
+            return True
+
+    def get_all_manifests(self):
+        return [
+            {
+                "id": pid,
+                "manifest": p["manifest"],
+                "enabled": self._is_enabled(pid),
+            }
+            for pid, p in self.plugins.items()
+        ]
+
+    def get_api(self, plugin_id: str):
+        p = self.plugins.get(plugin_id)
+        return p["api"] if p else None
+
+    def set_enabled(self, plugin_id: str, enabled: bool):
+        if plugin_id not in self.plugins:
+            return False
+        try:
+            settings = self.player.get_settings() or {}
+            disabled = list(settings.get('plugins_disabled') or [])
+            if enabled:
+                if plugin_id in disabled:
+                    disabled.remove(plugin_id)
+            else:
+                if plugin_id not in disabled:
+                    disabled.append(plugin_id)
+            self.player.save_settings(plugins_disabled=disabled)
+            return True
+        except Exception as e:
+            print(f"set_enabled error: {e}")
+            return False
+
+
+# ============================================================
+# ===== HTTP СЕРВЕР: frontend + covers + plugins =============
 # ============================================================
 class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
     base_dir = None
     frontend_dir = None
     covers_dir = None
+    plugins_dir = None
 
     def translate_path(self, path):
         path = path.split('?', 1)[0].split('#', 1)[0]
@@ -57,7 +182,11 @@ class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
         if path.startswith('/covers/'):
             rel = path[len('/covers/'):].lstrip('/').replace('..', '')
             full = self.covers_dir / rel
-            print(f"🔍 covers: {path} → {full} exists={full.exists()}")
+            return str(full)
+
+        if path.startswith('/plugins/'):
+            rel = path[len('/plugins/'):].lstrip('/').replace('..', '')
+            full = self.plugins_dir / rel
             return str(full)
 
         if path == '/' or path == '':
@@ -92,11 +221,13 @@ def _try_bind(handler_class, port, attempts=20):
     raise OSError(f"Не удалось найти свободный порт {port}..{port + attempts - 1}")
 
 
-def start_server(base_dir, frontend_dir, covers_dir, port, port_holder):
+def start_server(base_dir, frontend_dir, covers_dir, plugins_dir, port, port_holder):
     CustomHTTPHandler.base_dir = base_dir
     CustomHTTPHandler.frontend_dir = frontend_dir
     CustomHTTPHandler.covers_dir = covers_dir
+    CustomHTTPHandler.plugins_dir = plugins_dir
     httpd, real_port = _try_bind(CustomHTTPHandler, port)
+
     port_holder[0] = real_port
     print(f"✅ Сервер слушает порт {real_port}")
     try:
@@ -135,9 +266,14 @@ class Api:
         self.player = MusicPlayer(base_dir=data_dir)
         self.player.set_update_callback(self._on_player_update)
         self._running = True
-        self._start_progress_updater()
         self._waveform_cache_dir = self.player.base_dir / "waveform_cache"
         self._waveform_cache_dir.mkdir(exist_ok=True)
+
+        plugins_dir = Path(__file__).resolve().parent / "plugins"
+        self.plugin_loader = PluginLoader(plugins_dir, self.player)
+
+        self._start_progress_updater()
+        self._current_waveform = None
 
     # ---------------- Кэш waveform ----------------
 
@@ -169,20 +305,24 @@ class Api:
     # ---------------- Обновления UI ----------------
 
     def _start_progress_updater(self):
-        """
-        Лёгкий цикл: только позиция и playing. Без get_status().
-        Применяет offset из настроек.
-        """
         def update_loop():
             while self._running:
                 if self.window:
                     try:
+                        if self.player._switching_track:
+                            time.sleep(0.016)
+                            continue
+
+                        # Даём VLC 300 мс после play(), чтобы время не прыгало
+                        if self.player._last_play_at and (time.time() - self.player._last_play_at) < 0.3:
+                            time.sleep(0.016)
+                            continue
+
                         position = self.player.get_position()
                         playing = self.player.is_playing
                         duration_ms = self.player.get_duration_ms()
                         offset_ms = self.player.get_position_offset_ms()
 
-                        # Применяем offset к позиции
                         if duration_ms > 0:
                             position += offset_ms / duration_ms
                             position = max(0.0, min(1.0, position))
@@ -221,10 +361,14 @@ class Api:
         result = self.player.play(index)
         self._on_player_update()
         if result:
-            self._load_waveform_for_current_track()
+            threading.Thread(target=self._deliver_waveform, daemon=True).start()
         return result
 
-    def _load_waveform_for_current_track(self):
+    def _deliver_waveform(self):
+        """
+        Пытается отдать waveform для текущего трека максимально быстро.
+        Сначала — из кэша (мгновенно). Если кэша нет — генерирует в фоне.
+        """
         if not self.player._waveform_enabled:
             if self.window:
                 try:
@@ -234,38 +378,41 @@ class Api:
                 except Exception:
                     pass
             return
+
         try:
             status = self.player.get_status()
-            track_info = status.get('track_info') or {}
-            path = track_info.get('id')
+            info = status.get('track_info') or {}
+            path = info.get('id')
             if not path:
                 return
 
-            def worker(p=path):
-                try:
-                    waveform_data = self.generate_waveform(p)
-                    if waveform_data and self.window:
-                        self.window.evaluate_js(f"""
-                            if (typeof loadWaveform === 'function') {{
-                                loadWaveform({json.dumps(waveform_data)});
-                            }}
-                        """)
-                except Exception as e:
-                    print(f"waveform worker: {e}")
+            # 1. Пробуем отдать из кэша (мгновенно)
+            cached = self._read_waveform_from_cache(path)
+            if cached:
+                if self.window:
+                    self.window.evaluate_js(f"""
+                        if (typeof loadWaveform === 'function') {{
+                            loadWaveform({json.dumps(cached)});
+                        }}
+                    """)
+                return
 
-            threading.Thread(target=worker, daemon=True).start()
+            # 2. Кэша нет — считаем ffmpeg'ом
+            waveform_data = self.generate_waveform(path)
+            if waveform_data and self.window:
+                self.window.evaluate_js(f"""
+                    if (typeof loadWaveform === 'function') {{
+                        loadWaveform({json.dumps(waveform_data)});
+                    }}
+                """)
         except Exception as e:
-            print(f"waveform error: {e}")
+            print(f"waveform deliver: {e}")
 
-    def generate_waveform(self, file_path, points=None):
+    def _read_waveform_from_cache(self, file_path, points=None):
+        """Только читает кэш. Возвращает dict или None."""
         try:
             import struct
             import hashlib
-            import subprocess
-            import numpy as np
-
-            if not self.player._waveform_enabled:
-                return None
 
             if points is None:
                 points = self.player._waveform_points
@@ -280,18 +427,41 @@ class Api:
             key = hashlib.md5(key_src).hexdigest()
             cache_file = self._waveform_cache_dir / f"{key}.bin"
 
-            if cache_file.exists():
-                try:
-                    with open(cache_file, 'rb') as f:
-                        header = f.read(20)
-                        if len(header) == 20:
-                            magic, n_points, duration, _ = struct.unpack('<4sIdI', header)
-                            if magic == b'WAV1' and n_points == points:
-                                data = f.read(n_points)
-                                if len(data) == n_points:
-                                    return {'waveform': list(data), 'duration': float(duration)}
-                except Exception:
-                    pass
+            if not cache_file.exists():
+                return None
+
+            with open(cache_file, 'rb') as f:
+                header = f.read(20)
+                if len(header) != 20:
+                    return None
+                magic, n_points, duration, _ = struct.unpack('<4sIdI', header)
+                if magic != b'WAV1' or n_points != points:
+                    return None
+                data = f.read(n_points)
+                if len(data) != n_points:
+                    return None
+                return {'waveform': list(data), 'duration': float(duration)}
+        except Exception as e:
+            print(f"_read_waveform_from_cache: {e}")
+            return None
+
+    def generate_waveform(self, file_path, points=None):
+        try:
+            import struct
+            import hashlib
+            import subprocess
+            import numpy as np
+
+            if not self.player._waveform_enabled:
+                return None
+
+            if points is None:
+                points = self.player._waveform_points
+
+            # Сначала — кэш
+            cached = self._read_waveform_from_cache(file_path, points)
+            if cached:
+                return cached
 
             ffmpeg_bin = None
             for p in ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']:
@@ -368,14 +538,14 @@ class Api:
         result = self.player.next()
         self._on_player_update()
         if result:
-            self._load_waveform_for_current_track()
+            threading.Thread(target=self._deliver_waveform, daemon=True).start()
         return result
 
     def previous(self):
         result = self.player.previous()
         self._on_player_update()
         if result:
-            self._load_waveform_for_current_track()
+            threading.Thread(target=self._deliver_waveform, daemon=True).start()
         return result
 
     def shuffle(self):
@@ -428,7 +598,7 @@ class Api:
         result = self.player.switch_playlist(name)
         self._on_player_update()
         if result:
-            self._load_waveform_for_current_track()
+            threading.Thread(target=self._deliver_waveform, daemon=True).start()
         return result
 
     def remove_from_playlist(self, playlist_name, index):
@@ -448,8 +618,6 @@ class Api:
 
         result = self.player.add_files_to_playlist(playlist_name, valid_paths)
         self._on_player_update()
-        if result and result.get('added', 0) > 0:
-            self._load_waveform_for_current_track()
         return result
 
     def add_files_from_data(self, files_data):
@@ -494,7 +662,6 @@ class Api:
             self.player._save_state()
             if self.player.update_callback:
                 self.player.update_callback()
-            self._load_waveform_for_current_track()
 
         return {"added": len(added), "files": added}
 
@@ -545,7 +712,7 @@ class Api:
             return []
 
     def ready(self):
-        return True
+        return {"ok" : True}
 
     def get_dropped_folder_path(self):
         script = '''
@@ -611,6 +778,29 @@ class Api:
         self._on_player_update()
         return result
 
+    # ---------------- API для плагинов ----------------
+
+    def get_plugins(self):
+        return self.plugin_loader.get_all_manifests()
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool):
+        return self.plugin_loader.set_enabled(plugin_id, enabled)
+
+    def plugin_call(self, plugin_id: str, method: str, *args):
+        api = self.plugin_loader.get_api(plugin_id)
+        if not api:
+            print(f"❌ [plugin:{plugin_id}] не найден")
+            return {"error": f"plugin '{plugin_id}' not found"}
+        fn = getattr(api, method, None)
+        if not fn:
+            print(f"❌ [plugin:{plugin_id}] метод '{method}' не найден")
+            return {"error": f"method '{method}' not found"}
+        try:
+            return fn(*args)
+        except Exception as e:
+            print(f"❌ [plugin:{plugin_id}] {method}: {e}")
+            return {"error": str(e)}
+
 
 # ============================================================
 # ===== ЗАПУСК ==============================================
@@ -650,10 +840,11 @@ if __name__ == '__main__':
 
     PORT = int(os.environ.get("PLAYER_PORT", "8000"))
     port_holder = [PORT]
+    plugins_dir = Path(__file__).resolve().parent / "plugins"
 
     threading.Thread(
         target=start_server,
-        args=(base_dir, frontend_dir, api.player.covers_dir, PORT, port_holder),
+        args=(base_dir, frontend_dir, api.player.covers_dir, plugins_dir, PORT, port_holder),
         daemon=True
     ).start()
 
@@ -690,7 +881,7 @@ if __name__ == '__main__':
                     document.documentElement.setAttribute('data-theme', theme);
                 })();
             """)
-            api._load_waveform_for_current_track()
+            threading.Thread(target=api._deliver_waveform, daemon=True).start()
             window.evaluate_js("""
                 if (typeof loadStatus === 'function') {
                     loadStatus();
@@ -702,10 +893,7 @@ if __name__ == '__main__':
     window.events.loaded += on_loaded
 
     try:
-        print(f"🔍 handler.base_dir  = {CustomHTTPHandler.base_dir}")
-        print(f"🔍 frontend_dir      = {frontend_dir}")
-        print(f"🔍 api.player.covers = {api.player.covers_dir}")
-        webview.start(gui='cocoa')
+        webview.start(gui='cocoa', debug=True)
     finally:
         api._running = False
         api.player.shutdown()
