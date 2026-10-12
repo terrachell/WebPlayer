@@ -893,7 +893,7 @@ if __name__ == '__main__':
     window.events.loaded += on_loaded
 
     try:
-        webview.start(gui='cocoa', debug=True)
+        webview.start(gui='cocoa')
     finally:
         api._running = False
         api.player.shutdown()
