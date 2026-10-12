@@ -1,0 +1,13 @@
+{
+  "name": "Lyrics",
+  "id": "lyrics",
+  "version": "0.1.0",
+  "author": "terrachell",
+  "description": "Показывает LRC-текст синхронно с музыкой.",
+  "api_version": "1",
+  "slot": "content",
+  "entry": "index.html",
+  "styles": ["style.css"],
+  "scripts": ["script.js"],
+  "permissions": ["player.read"]
+}
