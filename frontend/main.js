@@ -1,5 +1,17 @@
 // frontend/main.js
-
+// Глушим системный звук при нажатии любых клавиш,
+// которые не обрабатываются приложением.
+document.addEventListener('keydown', (e) => {
+    // Если фокус не на input/textarea/select/contenteditable — глушим
+    const tag = (e.target.tagName || '').toLowerCase();
+    const isInput = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    
+    if (!isInput) {
+        // Пробел обрабатывается отдельно (плеер), но preventDefault не помешает
+        e.preventDefault();
+        // Опционально: e.stopPropagation(); (если нужно, чтобы событие не дошло до плеера)
+    }
+});
 // ============================================================
 // ===== АДАПТЕР API ==========================================
 // ============================================================
