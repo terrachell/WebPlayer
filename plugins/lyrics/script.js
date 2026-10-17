@@ -4,7 +4,7 @@
   'use strict';
 
   // ============================================================
-  // ===== ЛОГИРОВАНИЕ ==========================================
+  // ЛОГИРОВАНИЕ
   // ============================================================
   const T0 = performance.now();
   function ts() {
@@ -23,7 +23,7 @@
   log('IIFE start');
 
   // ============================================================
-  // ===== DOM ==================================================
+  // DOM
   // ============================================================
   const bodyEl = document.getElementById('lyrics-body');
   if (!bodyEl) {
@@ -33,7 +33,7 @@
   log('DOM: #lyrics-body найден');
 
   // ============================================================
-  // ===== КНОПКА В ХЕДЕРЕ ======================================
+  // КНОПКА В ХЕДЕРЕ
   // ============================================================
   const headerSlot = document.getElementById('plugin-slot-header');
   let headerBtn = null;
@@ -67,30 +67,26 @@
   }
 
   // ============================================================
-  // ===== FOCUS-РЕЖИМ ==========================================
+  // ТОГГЛ ФОКУСА (через ядро)
   // ============================================================
-function toggleLyricsFocus() {
-    const slot = document.getElementById('plugin-slot-content');
-    if (!slot) {
-        warn('слот content не найден');
-        return;
+  function toggleLyricsFocus() {
+    if (window.WebPlayer && window.WebPlayer.toggleContentPlugin) {
+      window.WebPlayer.toggleContentPlugin('lyrics');
+    } else {
+      warn('WebPlayer.toggleContentPlugin не найден');
     }
-    slot.classList.toggle('active');
-    if (headerBtn) {
-        headerBtn.classList.toggle('active', slot.classList.contains('active'));
-    }
-    log('focus переключён, active =', slot.classList.contains('active'));
-}
+  }
 
-window.WebPlayer.on('plugin:beforeUnmount', (data) => {
-    if (data && data.id === 'lyrics') {
-        log('плагин выгружается, убираю кнопку');
-        removeHeaderButton();
-    }
-});
+  // Подсветка кнопки при смене активного плагина
+  if (window.WebPlayer && window.WebPlayer.on) {
+    window.WebPlayer.on('content:activeChanged', (data) => {
+      if (!headerBtn) return;
+      headerBtn.classList.toggle('active', data.activeId === 'lyrics');
+    });
+  }
 
   // ============================================================
-  // ===== СОСТОЯНИЕ ============================================
+  // СОСТОЯНИЕ
   // ============================================================
   let lines = [];
   let activeIndex = -1;
@@ -100,7 +96,7 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
   let loadToken = 0;
 
   // ============================================================
-  // ===== ПАРСЕР LRC ===========================================
+  // ПАРСЕР LRC
   // ============================================================
   const LRC_RE = /^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)$/;
 
@@ -122,7 +118,7 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
   }
 
   // ============================================================
-  // ===== РЕНДЕР ===============================================
+  // РЕНДЕР
   // ============================================================
   function renderLines() {
     log('renderLines: строк =', lines.length);
@@ -174,11 +170,10 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
   }
 
   // ============================================================
-  // ===== ЗАГРУЗКА LRC =========================================
+  // ЗАГРУЗКА LRC
   // ============================================================
   async function loadLyricsForCurrentTrack(trackPath) {
-    log('loadLyricsForCurrentTrack вызван, trackPath =', trackPath,
-        '| currentTrackPath =', currentTrackPath);
+    log('loadLyricsForCurrentTrack вызван, trackPath =', trackPath);
 
     if (trackPath === currentTrackPath) {
       log('loadLyricsForCurrentTrack: путь не изменился, выход');
@@ -187,10 +182,9 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
 
     const token = ++loadToken;
     currentTrackPath = trackPath;
-    log('loadLyricsForCurrentTrack: token =', token, 'currentTrackPath ->', trackPath);
 
     if (!trackPath) {
-      log('loadLyricsForCurrentTrack: путь пустой, мгновенная очистка');
+      log('loadLyricsForCurrentTrack: путь пустой, очистка');
       if (token === loadToken) {
         lines = [];
         renderLines();
@@ -198,8 +192,6 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
       return;
     }
 
-    log('loadLyricsForCurrentTrack: запрашиваю read_file_next_to_track...');
-    const tBefore = performance.now();
     let text = null;
     try {
       text = await window.WebPlayer.pluginCall('lyrics', 'read_file_next_to_track', '.lrc');
@@ -207,9 +199,6 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
       warn('read_file_next_to_track упал:', e);
       text = null;
     }
-    const dt = (performance.now() - tBefore).toFixed(1);
-    log('loadLyricsForCurrentTrack: ответ получен за', dt, 'мс, длина =',
-        text ? text.length : 0, '| token =', token, 'loadToken =', loadToken);
 
     if (token !== loadToken) {
       log('loadLyricsForCurrentTrack: токен устарел, выбрасываю результат');
@@ -222,7 +211,7 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
   }
 
   // ============================================================
-  // ===== РЕАКЦИЯ НА ЯДРО ======================================
+  // РЕАКЦИЯ НА ОБНОВЛЕНИЕ СТАТУСА
   // ============================================================
   let updateCounter = 0;
 
@@ -239,9 +228,7 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
     // 1) позиция
     setActiveLine(findActiveIndex(seconds));
 
-    // 2) смена трека.
-    // ВАЖНО: не дёргаем Python каждый кадр. Пытаемся достать путь из status.
-    // Если не получилось — запрашиваем не чаще, чем раз в 30 кадров (~0.5 сек).
+    // 2) смена трека
     let path = status.track_info && status.track_info.id;
 
     if (path === undefined && (n % 30 === 0)) {
@@ -261,23 +248,31 @@ window.WebPlayer.on('plugin:beforeUnmount', (data) => {
   }
 
   // ============================================================
-  // ===== СТАРТ ================================================
+  // РЕАКЦИЯ НА ТИК ПОЗИЦИИ (60 fps)
+  // ============================================================
+  function onPlayerTick(position) {
+    if (!lines.length) return;
+    if (!window.currentStatus) return;
+
+    const total = (window.currentStatus.track_info && window.currentStatus.track_info.duration) || 0;
+    if (total <= 0) return;
+
+    const seconds = position * total;
+    setActiveLine(findActiveIndex(seconds));
+  }
+
+  // ============================================================
+  // СТАРТ
   // ============================================================
   log('старт: createHeaderButton');
   createHeaderButton();
 
   log('старт: подписка на player:update');
   window.WebPlayer.on('player:update', onPlayerUpdate);
-window.WebPlayer.on('player:tick', (position) => {
-    if (!lines.length) return;
-    if (!currentStatus) return;
 
-    const total = (currentStatus.track_info && currentStatus.track_info.duration) || 0;
-    if (total <= 0) return;
+  log('старт: подписка на player:tick');
+  window.WebPlayer.on('player:tick', onPlayerTick);
 
-    const seconds = position * total;
-    setActiveLine(findActiveIndex(seconds));
-});
   log('старт: первичный get_status');
   window.WebPlayer.pluginCall('lyrics', 'get_status')
     .then((st) => {
@@ -289,15 +284,14 @@ window.WebPlayer.on('player:tick', (position) => {
     });
 
   // ============================================================
-  // ===== ВЫГРУЗКА =============================================
+  // ВЫГРУЗКА
   // ============================================================
-  const slot = document.getElementById('plugin-slot-fullscreen');
-  if (slot) {
-    observer.observe(slot, { childList: true, subtree: false });
-    log('MutationObserver на выгрузку установлен');
-  } else {
-    warn('plugin-slot-fullscreen не найден — выгрузка не отслеживается');
-  }
+  window.WebPlayer.on('plugin:beforeUnmount', (data) => {
+    if (data && data.id === 'lyrics') {
+      log('плагин выгружается, убираю кнопку');
+      removeHeaderButton();
+    }
+  });
 
   log('IIFE end');
 })();
