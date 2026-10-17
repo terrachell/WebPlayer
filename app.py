@@ -29,21 +29,19 @@ for _path in _FFMPEG_PATHS:
         os.environ['PATH'] = os.path.dirname(_path) + ':' + os.environ.get('PATH', '')
         break
 
-# VLC libs (cask, brew formula, вручную)
-_VLC_LIB_CANDIDATES = [
-    '/Applications/VLC.app/Contents/MacOS/lib',
-    '/opt/homebrew/lib',
-    '/usr/local/lib',
-]
-for _p in _VLC_LIB_CANDIDATES:
-    if os.path.exists(os.path.join(_p, 'libvlc.dylib')) or \
-       os.path.exists(os.path.join(_p, 'libvlc.5.dylib')):
-        os.environ['DYLD_LIBRARY_PATH'] = _p + ':' + os.environ.get('DYLD_LIBRARY_PATH', '')
-        print(f"✅ VLC libs: {_p}")
-        break
+# =========================
+# ===== VLC (умная загрузка) =====
+# =========================
+# ВАЖНО: vlc_loader.setup() должен быть вызван ДО `import vlc`.
+# Это значит — до `from music_player import ...`.
+import vlc_loader
+
+if not vlc_loader.setup():
+    print("❌ VLC не найден. Установите VLC или используйте собранный .dmg.")
+    import sys
+    sys.exit(1)
 
 from music_player import MusicPlayer, AUDIO_EXTENSIONS, is_audio_file
-
 
 # ============================================================
 # Белый список методов Api, которые можно вызывать
