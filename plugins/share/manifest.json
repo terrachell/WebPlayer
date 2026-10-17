@@ -1,0 +1,11 @@
+{
+  "id": "share",
+  "name": "Share",
+  "version": "0.1.0",
+  "author": "terrachell",
+  "description": "Управление плеером с телефона",
+  "slot": "content",
+  "entry": "index.html",
+  "styles": ["style.css"],
+  "scripts": ["script.js"]
+}

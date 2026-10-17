@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MusicPlayer — Пульт</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a18;
+            color: #d0d8ee;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: #141425;
+            border: 1px solid rgba(124, 140, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        h1 { font-size: 20px; margin-bottom: 20px; color: #fff; }
+        .track {
+            font-size: 16px;
+            color: #7c8cff;
+            margin-bottom: 6px;
+            word-wrap: break-word;
+            font-weight: 500;
+        }
+        .artist {
+            font-size: 13px;
+            color: #7a8aaa;
+            margin-bottom: 4px;
+            min-height: 16px;
+        }
+        .time {
+            font-size: 13px;
+            color: #7a8aaa;
+            margin-bottom: 16px;
+            font-variant-numeric: tabular-nums;
+        }
+        .progress {
+            width: 100%;
+            height: 4px;
+            background: rgba(124, 140, 255, 0.15);
+            border-radius: 2px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #7c8cff;
+            width: 0%;
+            transition: width 0.2s linear;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+        }
+        button {
+            background: rgba(124, 140, 255, 0.12);
+            border: 1px solid rgba(124, 140, 255, 0.2);
+            color: #7c8cff;
+            font-size: 22px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button:active { transform: scale(0.95); }
+        button:hover { background: rgba(124, 140, 255, 0.2); }
+        button.play-btn {
+            width: 68px;
+            height: 68px;
+            font-size: 26px;
+            background: rgba(124, 140, 255, 0.2);
+        }
+        .volume-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .volume-row input {
+            flex: 1;
+            accent-color: #7c8cff;
+        }
+        .status {
+            font-size: 11px;
+            color: #4a5a7a;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🎵 Пульт</h1>
+        <div class="track" id="track">—</div>
+        <div class="artist" id="artist"></div>
+        <div class="time" id="time">0:00 / 0:00</div>
+        <div class="progress" id="progress"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="controls">
+            <button onclick="prev()">⏮</button>
+            <button class="play-btn" onclick="togglePlay()" id="playBtn">▶</button>
+            <button onclick="next()">⏭</button>
+        </div>
+        <div class="volume-row">
+            <span>🔊</span>
+            <input type="range" id="volume" min="0" max="100" value="70" oninput="onVolumeInput(this.value)">
+            <span id="volVal">70%</span>
+        </div>
+        <div class="status" id="status">подключение...</div>
+    </div>
+
+<script>
+    let _lastVolumeSend = 0;
+    let _lastDuration = 0;
+    let _volumeUserActive = 0;  // timestamp последнего действия с громкостью
+
+    async function call(method, ...args) {
+        const res = await fetch('/plugin-call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method, args })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'unknown error');
+        return data.result;
+    }
+
+    function fmt(s) {
+        if (!s && s !== 0) return '0:00';
+        const m = Math.floor(s / 60);
+        const ss = Math.floor(s % 60);
+        return `${m}:${String(ss).padStart(2, '0')}`;
+    }
+
+    async function refresh() {
+        try {
+            const s = await call('get_status');
+            if (!s) return;
+
+            document.getElementById('track').textContent = s.track || '—';
+            const info = s.track_info || {};
+            document.getElementById('artist').textContent = info.artist || '';
+
+            const total = info.duration || 0;
+            _lastDuration = total;
+            const pos = (s.position || 0) * total;
+
+            document.getElementById('time').textContent = `${fmt(pos)} / ${fmt(total)}`;
+
+            const pct = total > 0 ? (s.position || 0) * 100 : 0;
+            document.getElementById('progress-fill').style.width = pct + '%';
+
+            document.getElementById('status').textContent = s.playing ? '▶ играет' : '⏸ пауза';
+            document.getElementById('playBtn').textContent = s.playing ? '⏸' : '▶';
+
+            // Обновляем громкость ТОЛЬКО если пользователь не крутил последние 1.5 сек
+            const now = Date.now();
+            if (now - _volumeUserActive > 1500) {
+                const volInput = document.getElementById('volume');
+                if (parseInt(volInput.value) !== s.volume) {
+                    volInput.value = s.volume;
+                    document.getElementById('volVal').textContent = s.volume + '%';
+                }
+            }
+        } catch (e) {
+            console.error('refresh error:', e);
+            document.getElementById('status').textContent = 'нет связи';
+        }
+    }
+
+    async function togglePlay() { await call('pause'); setTimeout(refresh, 300); }
+    async function next() { await call('next'); setTimeout(refresh, 300); }
+    async function prev() { await call('previous'); setTimeout(refresh, 300); }
+
+let _volumeCommitTimer = null;
+
+function onVolumeInput(v) {
+    _volumeUserActive = Date.now();
+    document.getElementById('volVal').textContent = v + '%';
+
+    // Быстрая отправка для отзывчивости (throttle 150 мс)
+    const now = Date.now();
+    if (now - _lastVolumeSend > 150) {
+        _lastVolumeSend = now;
+        call('set_volume', parseInt(v)).catch(() => {});
+    }
+
+    // Финальная отправка через 300 мс после последнего движения
+    if (_volumeCommitTimer) clearTimeout(_volumeCommitTimer);
+    _volumeCommitTimer = setTimeout(() => {
+        call('set_volume', parseInt(v)).catch(() => {});
+        _volumeCommitTimer = null;
+    }, 300);
+}
+
+    const progressEl = document.getElementById('progress');
+    progressEl.addEventListener('click', async (e) => {
+        if (_lastDuration <= 0) return;
+        const rect = progressEl.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+
+        document.getElementById('progress-fill').style.width = (ratio * 100) + '%';
+        document.getElementById('time').textContent = 
+            `${fmt(ratio * _lastDuration)} / ${fmt(_lastDuration)}`;
+
+        await call('seek', ratio);
+    });
+
+    setInterval(refresh, 1000);
+    refresh();
+</script>
+</body>
+</html>
