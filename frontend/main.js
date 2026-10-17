@@ -265,12 +265,6 @@ function updateProgress(position) {
         if (typeof Visualizer !== 'undefined') Visualizer.setPosition(currentPosition);
     }
 
-    if (window.WebPlayer && window.WebPlayer.emit) {
-        window.WebPlayer.emit('player:tick', currentPosition);
-    }
-
-    // Время обновляем почаще — раз в ~250 мс (когда позиция меняется заметно)
-    // или когда предыдущее значение времени ещё не выставлялось.
     if (waveformDuration > 0) {
         const timeEl = document.getElementById('trackTime');
         if (timeEl) {
@@ -280,6 +274,11 @@ function updateProgress(position) {
                 timeEl.textContent = newText;
             }
         }
+    }
+
+    // Тик для плагинов (LRC, визуализатор плагина и т.д.)
+    if (window.WebPlayer && window.WebPlayer.emit) {
+        window.WebPlayer.emit('player:tick', currentPosition);
     }
 }
 

@@ -1206,22 +1206,23 @@ body[data-cover-size="large"] .track-item {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    pointer-events: none;   /* сами слоты не перехватывают клики */
+    pointer-events: none;
 }
 
 .plugin-slot .plugin-root {
-    pointer-events: auto;   /* а плагины внутри — перехватывают */
+    pointer-events: auto;
 }
 
-/* --- HEADER: справа от счётчика, перед кнопками --- */
+/* --- HEADER --- */
 .plugin-slot-header {
     display: flex;
     align-items: center;
-    gap: 0px;
-	margin: 8px;
-    pointer-events: auto;   /* ← важно */
-    position: relative;      /* ← важно */
-    z-index: 1;              /* ← важно */
+	flex-direction: row;
+    gap: 8px;
+    margin: 8px;
+    pointer-events: auto;
+    position: relative;
+    z-index: 1;
 }
 
 .plugin-slot-header .plugin-root {
@@ -1229,7 +1230,7 @@ body[data-cover-size="large"] .track-item {
     align-items: center;
 }
 
-/* --- SIDEBAR: снизу сайдбара --- */
+/* --- SIDEBAR --- */
 .plugin-slot-sidebar {
     margin-top: 8px;
 }
@@ -1239,12 +1240,12 @@ body[data-cover-size="large"] .track-item {
     box-sizing: border-box;
 }
 
-/* --- PLAYER: под контролами --- */
+/* --- PLAYER --- */
 .plugin-slot-player {
     margin-top: 8px;
 }
 
-/* --- OVERLAY: поверх контента, справа сверху --- */
+/* --- OVERLAY --- */
 .plugin-slot-overlay {
     position: absolute;
     top: 12px;
@@ -1259,18 +1260,18 @@ body[data-cover-size="large"] .track-item {
     box-sizing: border-box;
 }
 
-/* На узких экранах overlay сжимается */
 @media (max-width: 900px) {
     .plugin-slot-overlay {
         width: 240px;
     }
 }
 
+/* --- FULLSCREEN --- */
 .plugin-slot-fullscreen {
     position: fixed;
     inset: 0;
     z-index: 900;
-    display: none;              /* ← вот это */
+    display: none;
     pointer-events: none;
 }
 
@@ -1281,34 +1282,12 @@ body[data-cover-size="large"] .track-item {
     pointer-events: auto;
     background: transparent;
 }
-.content {
-    position: relative;   /* нужно для absolute-слота */
-}
-
-.plugin-slot-content {
-    position: absolute;
-    inset: 0;
-    display: none;
-    z-index: 10;
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.plugin-slot-content.active {
-    display: flex;
-    flex-direction: column;
-}
-
-.plugin-slot-content .plugin-root {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-}
 
 /* ============================================================
-   Обёртка для списка треков и слота content
+   CONTENT: взаимоисключение плагинов
    ============================================================ */
+
+/* Обёртка для списка треков и слота content */
 .playlist-area {
     position: relative;
     flex: 1;
@@ -1317,8 +1296,7 @@ body[data-cover-size="large"] .track-item {
     flex-direction: column;
 }
 
-/* Слот content — растягивается на всю .playlist-area,
-   но не заезжает на .player-panel */
+/* Слот content — растягивается на всю .playlist-area */
 .plugin-slot-content {
     position: absolute;
     inset: 0;
@@ -1333,9 +1311,15 @@ body[data-cover-size="large"] .track-item {
     flex-direction: column;
 }
 
+/* Каждый plugin-root по умолчанию скрыт */
 .plugin-slot-content .plugin-root {
     width: 100%;
     height: 100%;
-    display: flex;
+    display: none;
     flex-direction: column;
+}
+
+/* Активный plugin-root — виден */
+.plugin-slot-content .plugin-root.active {
+    display: flex;
 }
