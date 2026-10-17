@@ -638,6 +638,15 @@ class MusicPlayer:
         if not force and (now - self._state_last_save) < self._state_save_interval:
             self._state_dirty = True
             return
+
+        try:
+            ms = self.player.get_time()
+            d = self.get_duration_ms()
+            if d > 0 and ms is not None and ms >= 0:
+                self._saved_position = max(0.0, min(1.0, ms / d))
+        except Exception:
+            pass
+        
         try:
             state = {
                 'last_playlist': self.current_playlist,
@@ -1057,27 +1066,21 @@ class MusicPlayer:
                 pass
         return 70
 
+    # ==================== ПАТЧ 1: pause() ====================
     def pause(self):
         if not self.player:
             return False
         with self._lock:
             try:
                 vlc_state = self.player.get_state()
-            except Exception as e:
-                vlc_state = f"err: {e}"
+            except Exception:
+                vlc_state = None
 
             if vlc_state == vlc.State.Playing:
                 self.player.pause()
                 self.is_playing = False
-                time.sleep(0.05)
-                ms = self.player.get_time()
-                d = self.get_duration_ms()
-                if d > 0 and ms is not None and ms >= 0:
-                    self._saved_position = max(0.0, min(1.0, ms / d))
             else:
                 return self.resume()
-
-            self._save_state()
             return True
 
     def stop(self):
@@ -1093,70 +1096,15 @@ class MusicPlayer:
         self._save_state()
         return True
 
+    # ==================== ПАТЧ 2: resume() ====================
     def resume(self):
-        if not self._current_track_path or not os.path.exists(self._current_track_path):
+        if not self.player:
             return False
         with self._lock:
-            # Готовим трек на свободном плеере, потом переключаемся
-            old_player = self.player
-            new_player_idx = 1 - self._active_player_idx
-            new_player = self.players[new_player_idx]
-
-            try:
-                if new_player.get_media() is not None:
-                    new_player.stop()
-            except Exception:
-                pass
-
-            media = self.vlc_instance.media_new(self._current_track_path)
-            new_player.set_media(media)
-
-            try:
-                new_player.audio_set_volume(self._get_current_volume())
-            except Exception:
-                pass
-            self._apply_eq_to(new_player)
-
-            duration = self.get_duration_ms()
-            saved_ms = int(self._saved_position * duration) if duration > 0 and self._saved_position > 0 else 0
-
-            new_player.play()
-
-            # Останавливаем старый
-            try:
-                if old_player.get_media() is not None:
-                    old_player.stop()
-            except Exception:
-                pass
-
-            self._active_player_idx = new_player_idx
+            # VLC хранит позицию внутри MediaPlayer между pause() и play().
+            # Никаких пересозданий media, никаких start-time.
+            self.player.play()
             self.is_playing = True
-            self._public_track_path = self._current_track_path
-
-            if saved_ms > 0:
-                deadline = time.time() + 2.0
-                while time.time() < deadline:
-                    try:
-                        if new_player.get_state() == vlc.State.Playing:
-                            break
-                    except Exception:
-                        pass
-                    time.sleep(0.02)
-
-                for _ in range(5):
-                    try:
-                        new_player.set_time(saved_ms)
-                    except Exception:
-                        pass
-                    time.sleep(0.03)
-                    try:
-                        real = new_player.get_time()
-                        if real is not None and abs(real - saved_ms) < 500:
-                            break
-                    except Exception:
-                        pass
-
-            self._save_state()
             return True
 
     def next(self):
@@ -1212,8 +1160,6 @@ class MusicPlayer:
             self.player.set_time(ms)
         else:
             self.player.set_position(position)
-        self._saved_position = position
-        self._save_state()
         return True
 
     def set_volume(self, volume):
@@ -1239,12 +1185,17 @@ class MusicPlayer:
 
     def get_position(self):
         if self._switching_track:
-            return self._saved_position
-        ms = self.get_time_ms()
-        d = self.get_duration_ms()
-        if d > 0 and ms >= 0:
-            return max(0.0, min(1.0, ms / d))
-        return self._saved_position
+            return 0.0
+        if not self.player:
+            return 0.0
+        try:
+            ms = self.player.get_time()
+            d = self.get_duration_ms()
+            if d > 0 and ms is not None and ms >= 0:
+                return max(0.0, min(1.0, ms / d))
+        except Exception:
+            pass
+        return 0.0
 
     def get_current_track(self):
         if 0 <= self.current_index < len(self.tracks):
