@@ -1,7 +1,6 @@
 # app.py
 
 import os
-import sys
 import platform
 import json
 import threading
@@ -11,41 +10,55 @@ import subprocess
 import socket
 from pathlib import Path
 
-# ============================================================
-# 1. VLC: настраиваем ДО всего, что импортирует vlc
-# ============================================================
-from vlc_loader import setup as setup_vlc
+import webview
+import http.server
+import socketserver
 
-_vlc_ok = setup_vlc()
-if not _vlc_ok:
-    print("⚠️  VLC не найден.")
-    print("    Установите VLC: https://www.videolan.org/vlc/")
-    print("    Или используйте собранный .dmg (VLC встроен).")
+# =========================
+# ===== ТОЛЬКО macOS ======
+# =========================
 
-# ============================================================
-# 2. ffmpeg: ищем в системе и в бандле
-# ============================================================
-_FFMPEG_PATHS = []
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    _FFMPEG_PATHS.append(str(Path(sys._MEIPASS) / "ffmpeg"))
-_FFMPEG_PATHS += [
-    '/opt/homebrew/bin/ffmpeg',
+# ffmpeg
+_FFMPEG_PATHS = [
     '/usr/local/bin/ffmpeg',
+    '/opt/homebrew/bin/ffmpeg',
     '/usr/bin/ffmpeg',
 ]
 for _path in _FFMPEG_PATHS:
     if os.path.exists(_path):
         os.environ['PATH'] = os.path.dirname(_path) + ':' + os.environ.get('PATH', '')
-        print(f"✅ ffmpeg: {_path}")
         break
 
-import webview
-import http.server
-import socketserver
+# VLC libs (cask, brew formula, вручную)
+_VLC_LIB_CANDIDATES = [
+    '/Applications/VLC.app/Contents/MacOS/lib',
+    '/opt/homebrew/lib',
+    '/usr/local/lib',
+]
+for _p in _VLC_LIB_CANDIDATES:
+    if os.path.exists(os.path.join(_p, 'libvlc.dylib')) or \
+       os.path.exists(os.path.join(_p, 'libvlc.5.dylib')):
+        os.environ['DYLD_LIBRARY_PATH'] = _p + ':' + os.environ.get('DYLD_LIBRARY_PATH', '')
+        print(f"✅ VLC libs: {_p}")
+        break
 
 from music_player import MusicPlayer, AUDIO_EXTENSIONS, is_audio_file
 
-# ... дальше всё как было
+
+# ============================================================
+# Белый список методов Api, которые можно вызывать
+# через HTTP из плагинов (POST /plugin-call).
+# ============================================================
+ALLOWED_PLUGIN_METHODS = {
+    'get_status',
+    'get_playlist_tracks',
+    'play', 'pause', 'stop', 'next', 'previous',
+    'seek', 'set_volume', 'shuffle', 'toggle_repeat',
+}
+
+# Реальный порт HTTP-сервера ядра. Обновляется при старте.
+# Нужен для PluginApi.get_url(), чтобы отдать плагину правильный URL.
+_SERVER_PORT = 8000
 
 
 # ============================================================
@@ -58,9 +71,10 @@ class PluginApi:
     Никакого os.system, open(), subprocess.
     Только чтение состояния плеера.
     """
-    def __init__(self, player, plugin_id: str):
+    def __init__(self, player, plugin_id: str, loader=None):
         self._player = player
         self._plugin_id = plugin_id
+        self._loader = loader
 
     def get_status(self):
         return self._player.get_status()
@@ -81,7 +95,6 @@ class PluginApi:
         file_path = Path(track_path).with_suffix(extension)
         if not file_path.exists():
             return None
-        print(f"[lyrics-debug] looking for: {file_path}, exists={file_path.exists()}")
         try:
             if mode == 'text':
                 return file_path.read_text(encoding='utf-8')
@@ -92,14 +105,49 @@ class PluginApi:
             print(f"❌ [plugin:{self._plugin_id}] read_file_next_to_track({extension}, {mode}): {e}")
             return None
 
+    def get_url(self):
+        """
+        Возвращает URL, по которому телефон может открыть мобильный пульт.
+        Использует локальный IP Mac'а и порт HTTP-сервера ядра.
+        """
+        global _SERVER_PORT
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        except Exception:
+            local_ip = "127.0.0.1"
+        finally:
+            s.close()
+
+        port = _SERVER_PORT
+        return {
+            'url': f"http://{local_ip}:{port}/plugins/{self._plugin_id}/mobile.html",
+            'port': port,
+        }
+
+    def get_server_result(self):
+        """
+        Возвращает результат, который вернули python-модули плагина
+        (см. manifest.json -> "python"). Оставлено для совместимости.
+        """
+        if not self._loader:
+            return {}
+        entry = self._loader.plugins.get(self._plugin_id)
+        if not entry:
+            return {}
+        return entry.get("server_result", {})
+
     def log(self, message: str):
         print(f"[plugin:{self._plugin_id}] {message}")
 
 
 class PluginLoader:
-    def __init__(self, plugins_dir: Path, player):
+    def __init__(self, plugins_dir: Path, player, api):
         self.plugins_dir = plugins_dir
         self.player = player
+        self.api = api
         self.plugins = {}
         self._load_all()
 
@@ -107,6 +155,8 @@ class PluginLoader:
         if not self.plugins_dir.exists():
             print(f"ℹ️  Папка плагинов не найдена: {self.plugins_dir}")
             return
+
+        import importlib.util
 
         for folder in sorted(self.plugins_dir.iterdir()):
             if not folder.is_dir():
@@ -117,12 +167,50 @@ class PluginLoader:
             try:
                 data = json.loads(manifest_path.read_text(encoding="utf-8"))
                 pid = data["id"]
+
+                # Регистрируем плагин
                 self.plugins[pid] = {
                     "manifest": data,
                     "path": folder,
-                    "api": PluginApi(self.player, pid),
+                    "api": None,
+                    "python_modules": [],
+                    "server_result": {},
                 }
+
+                # Создаём PluginApi
+                self.plugins[pid]["api"] = PluginApi(self.player, pid, self)
+
+                # Запускаем python-модули, если указаны в манифесте
+                python_files = data.get("python", []) or []
+                for py_file in python_files:
+                    py_path = folder / py_file
+                    if not py_path.exists():
+                        print(f"❌ [plugin:{pid}] python-модуль не найден: {py_file}")
+                        continue
+                    try:
+                        spec = importlib.util.spec_from_file_location(
+                            f"plugin_{pid}_{py_file.replace('.py', '')}",
+                            py_path
+                        )
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+
+                        if hasattr(mod, "start") and callable(mod.start):
+                            result = mod.start(self.plugins[pid]["api"], folder)
+                            if isinstance(result, dict):
+                                self.plugins[pid]["server_result"].update(result)
+                            print(f"✅ [plugin:{pid}] {py_file} запущен, результат: {result}")
+                        else:
+                            print(f"⚠️  [plugin:{pid}] {py_file}: нет функции start()")
+
+                        self.plugins[pid]["python_modules"].append(mod)
+                    except Exception as e:
+                        import traceback
+                        print(f"❌ [plugin:{pid}] {py_file} упал: {e}")
+                        traceback.print_exc()
+
                 print(f"✅ Плагин загружен: {pid} v{data.get('version', '?')}")
+
             except Exception as e:
                 print(f"❌ Плагин {folder.name} не загружен: {e}")
 
@@ -168,13 +256,14 @@ class PluginLoader:
 
 
 # ============================================================
-# ===== HTTP СЕРВЕР: frontend + covers + plugins =============
+# ===== HTTP СЕРВЕР: frontend + covers + plugins + plugin-call
 # ============================================================
 class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
     base_dir = None
     frontend_dir = None
     covers_dir = None
     plugins_dir = None
+    api = None
 
     def translate_path(self, path):
         path = path.split('?', 1)[0].split('#', 1)[0]
@@ -201,6 +290,76 @@ class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    # ============================================================
+    # POST /plugin-call — вызов методов Api из плагинов
+    # ============================================================
+    def do_POST(self):
+        if self.path != '/plugin-call':
+            self.send_error(404, 'Not found')
+            return
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            if length <= 0:
+                self._json_response(400, {'ok': False, 'error': 'empty body'})
+                return
+
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode('utf-8'))
+
+            method = data.get('method')
+            args = data.get('args', []) or []
+
+            if not method:
+                self._json_response(400, {'ok': False, 'error': 'missing method'})
+                return
+
+            if method not in ALLOWED_PLUGIN_METHODS:
+                self._json_response(403, {'ok': False, 'error': f'method "{method}" not allowed'})
+                return
+
+            api = CustomHTTPHandler.api
+            if api is None:
+                self._json_response(503, {'ok': False, 'error': 'api not available'})
+                return
+
+            fn = getattr(api, method, None)
+            if not callable(fn):
+                self._json_response(404, {'ok': False, 'error': f'method "{method}" not found'})
+                return
+
+            try:
+                result = fn(*args)
+                self._json_response(200, {'ok': True, 'result': result})
+            except Exception as e:
+                print(f"[plugin-call] {method} error: {e}")
+                self._json_response(500, {'ok': False, 'error': str(e)})
+
+        except Exception as e:
+            print(f"[plugin-call] error: {e}")
+            try:
+                self._json_response(500, {'ok': False, 'error': str(e)})
+            except Exception:
+                pass
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def _json_response(self, status, obj):
+        body = json.dumps(obj).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        self.wfile.write(body)
+
 
 class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
@@ -221,15 +380,22 @@ def _try_bind(handler_class, port, attempts=20):
     raise OSError(f"Не удалось найти свободный порт {port}..{port + attempts - 1}")
 
 
-def start_server(base_dir, frontend_dir, covers_dir, plugins_dir, port, port_holder):
+def start_server(base_dir, frontend_dir, covers_dir, plugins_dir, port, port_holder, api):
     CustomHTTPHandler.base_dir = base_dir
     CustomHTTPHandler.frontend_dir = frontend_dir
     CustomHTTPHandler.covers_dir = covers_dir
     CustomHTTPHandler.plugins_dir = plugins_dir
+    CustomHTTPHandler.api = api
+
     httpd, real_port = _try_bind(CustomHTTPHandler, port)
 
     port_holder[0] = real_port
     print(f"✅ Сервер слушает порт {real_port}")
+
+    global _SERVER_PORT
+    _SERVER_PORT = real_port
+    print(f"🌐 Порт для плагинов: {_SERVER_PORT}")
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -270,7 +436,7 @@ class Api:
         self._waveform_cache_dir.mkdir(exist_ok=True)
 
         plugins_dir = Path(__file__).resolve().parent / "plugins"
-        self.plugin_loader = PluginLoader(plugins_dir, self.player)
+        self.plugin_loader = PluginLoader(plugins_dir, self.player, self)
 
         self._start_progress_updater()
         self._current_waveform = None
@@ -313,7 +479,6 @@ class Api:
                             time.sleep(0.016)
                             continue
 
-                        # Даём VLC 300 мс после play(), чтобы время не прыгало
                         if self.player._last_play_at and (time.time() - self.player._last_play_at) < 0.3:
                             time.sleep(0.016)
                             continue
@@ -342,18 +507,36 @@ class Api:
         threading.Thread(target=update_loop, daemon=True).start()
 
     def _on_player_update(self):
-        if self.window:
+        """Debounce: откладывает обновление UI на 0.15 сек после последнего события."""
+        if not self.window:
+            return
+        
+        # Отменяем предыдущий таймер, если есть
+        old_timer = getattr(self, '_ui_update_timer', None)
+        if old_timer is not None:
             try:
-                self.window.evaluate_js("""
-                    if (typeof loadStatus === 'function') {
-                        loadStatus();
-                    }
-                """)
+                old_timer.cancel()
             except Exception:
                 pass
-
-    def log(self, message):
-        pass
+        
+        # Создаём новый
+        self._ui_update_timer = threading.Timer(0.15, self._do_ui_update)
+        self._ui_update_timer.daemon = True
+        self._ui_update_timer.start()
+    
+    def _do_ui_update(self):
+        """Актуальное обновление UI. Вызывается debounce-таймером."""
+        self._ui_update_timer = None
+        if not self.window:
+            return
+        try:
+            self.window.evaluate_js("""
+                if (typeof loadStatus === 'function') {
+                    loadStatus();
+                }
+            """)
+        except Exception as e:
+            print(f"[_do_ui_update] error: {e}")
 
     # ---------------- Воспроизведение ----------------
 
@@ -365,10 +548,6 @@ class Api:
         return result
 
     def _deliver_waveform(self):
-        """
-        Пытается отдать waveform для текущего трека максимально быстро.
-        Сначала — из кэша (мгновенно). Если кэша нет — генерирует в фоне.
-        """
         if not self.player._waveform_enabled:
             if self.window:
                 try:
@@ -386,7 +565,6 @@ class Api:
             if not path:
                 return
 
-            # 1. Пробуем отдать из кэша (мгновенно)
             cached = self._read_waveform_from_cache(path)
             if cached:
                 if self.window:
@@ -397,7 +575,6 @@ class Api:
                     """)
                 return
 
-            # 2. Кэша нет — считаем ffmpeg'ом
             waveform_data = self.generate_waveform(path)
             if waveform_data and self.window:
                 self.window.evaluate_js(f"""
@@ -409,7 +586,6 @@ class Api:
             print(f"waveform deliver: {e}")
 
     def _read_waveform_from_cache(self, file_path, points=None):
-        """Только читает кэш. Возвращает dict или None."""
         try:
             import struct
             import hashlib
@@ -458,7 +634,6 @@ class Api:
             if points is None:
                 points = self.player._waveform_points
 
-            # Сначала — кэш
             cached = self._read_waveform_from_cache(file_path, points)
             if cached:
                 return cached
@@ -517,13 +692,35 @@ class Api:
             print(f"waveform error: {e}")
             return None
 
+
     def pause(self):
         if not self.player:
             return {"playing": False, "position": 0.0}
+        
         if self.player.is_playing:
+            # Играет → пауза
             self.player.pause()
         else:
-            self.player.resume()
+            # Не играет → надо проверить, загружена ли media в VLC.
+            # Если media нет — resume() ничего не сыграет.
+            mp = self.player
+            has_media = False
+            try:
+                if mp.player is not None and mp.player.get_media() is not None:
+                    has_media = True
+            except Exception:
+                has_media = False
+            
+            if has_media:
+                # Трек загружен (пауза) → resume
+                mp.resume()
+            else:
+                # Трек не загружен вообще → играем текущий индекс
+                if mp.tracks and 0 <= mp.current_index < len(mp.tracks):
+                    mp.play(mp.current_index, _source="remote_play")
+                else:
+                    return {"playing": False, "position": 0.0, "error": "no track"}
+        self._on_player_update()
         return {
             "playing": self.player.is_playing,
             "position": self.player.get_position(),
@@ -554,7 +751,9 @@ class Api:
         return result
 
     def set_volume(self, volume):
-        return self.player.set_volume(volume)
+        result = self.player.set_volume(volume)
+        self._on_player_update()
+        return result
 
     def toggle_repeat(self):
         result = self.player.toggle_repeat()
@@ -562,7 +761,9 @@ class Api:
         return result
 
     def seek(self, position):
-        return self.player.seek(position)
+        result = self.player.seek(position)
+        self._on_player_update()
+        return result
 
     # ---------------- Статус / плейлисты ----------------
 
@@ -712,7 +913,7 @@ class Api:
             return []
 
     def ready(self):
-        return {"ok" : True}
+        return True
 
     def get_dropped_folder_path(self):
         script = '''
@@ -844,7 +1045,7 @@ if __name__ == '__main__':
 
     threading.Thread(
         target=start_server,
-        args=(base_dir, frontend_dir, api.player.covers_dir, plugins_dir, PORT, port_holder),
+        args=(base_dir, frontend_dir, api.player.covers_dir, plugins_dir, PORT, port_holder, api),
         daemon=True
     ).start()
 
