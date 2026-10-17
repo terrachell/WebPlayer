@@ -621,6 +621,15 @@ class Api:
             print(f"_read_waveform_from_cache: {e}")
             return None
 
+    def _cache_key_for(self, file_path, points):
+        """Возвращает путь к файлу кэша для waveform."""
+        import hashlib
+        mtime = os.path.getmtime(file_path)
+        fsize = os.path.getsize(file_path)
+        key_src = f"{file_path}|{mtime}|{fsize}|{points}".encode('utf-8')
+        key = hashlib.md5(key_src).hexdigest()
+        return self._waveform_cache_dir / f"{key}.bin"
+
     def generate_waveform(self, file_path, points=None):
         try:
             import struct
@@ -678,8 +687,9 @@ class Api:
             if max_val > 0:
                 peaks = peaks / max_val
             peaks_u8 = np.clip(peaks * 255.0, 0, 255).astype(np.uint8)
-
+            
             try:
+                cache_file = self._cache_key_for(file_path, points)
                 with open(cache_file, 'wb') as f:
                     f.write(struct.pack('<4sIdI', b'WAV1', points, duration, 0))
                     f.write(peaks_u8.tobytes())
