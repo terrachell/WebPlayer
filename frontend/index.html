@@ -153,6 +153,19 @@
         <div class="ctx-item ctx-danger" data-action="delete">🗑 Удалить из плейлиста</div>
     </div>
 
+    <!-- Универсальный inline-prompt -->
+    <div id="inlinePromptOverlay" class="inline-prompt-overlay" hidden>
+        <div class="inline-prompt-dialog">
+            <div class="inline-prompt-icon">✎</div>
+            <div class="inline-prompt-label" id="inlinePromptLabel">Введите значение:</div>
+            <input type="text" id="inlinePromptInput" class="inline-prompt-input" autocomplete="off" spellcheck="false">
+            <div class="inline-prompt-actions">
+                <button type="button" id="inlinePromptCancel" class="inline-prompt-btn cancel">Cancel</button>
+                <button type="button" id="inlinePromptOk" class="inline-prompt-btn ok">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script src="api.js"></script>
     <script src="settings.js"></script>
     <script src="visualizer.js"></script>

@@ -773,8 +773,12 @@ class MusicPlayer:
         with self._lock:
             self.current_playlist = name
             self.tracks = self._tracks_for_playlist(name)
-            self.current_index = 0 if self.tracks else -1
-            self._current_track_path = self.tracks[0] if self.tracks else None
+            if not self.is_playing:
+                if self._current_track_path and self._current_track_path not in self.tracks:
+                    # Старый трек не в новом плейлисте → плеер пустой
+                    self._current_track_path = None
+                    self.current_index = -1
+            
             if self._shuffle:
                 self._build_shuffle_order()
             self._save_state()

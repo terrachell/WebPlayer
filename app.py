@@ -417,6 +417,7 @@ def get_local_ip():
 class Api:
     def __init__(self):
         self.window = None
+        self._last_waveform_path = None
 
         import sys
         if getattr(sys, 'frozen', False):
@@ -533,6 +534,12 @@ class Api:
                     loadStatus();
                 }
             """)
+            current_info = self.player.get_current_track_info()
+            current_path = current_info.get('id') if current_info else None
+            
+            if current_path and current_path != getattr(self, '_last_waveform_path', None):
+                self._last_waveform_path = current_path
+                threading.Thread(target=self._deliver_waveform, daemon=True).start()
         except Exception as e:
             print(f"[_do_ui_update] error: {e}")
 
@@ -646,12 +653,31 @@ class Api:
                 return cached
 
             ffmpeg_bin = None
-            for p in ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']:
-                if os.path.exists(p):
-                    ffmpeg_bin = p
-                    break
+
+            # 1. Встроенный ffmpeg (в .app через PyInstaller)
+            import sys
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                candidates = [
+                    Path(sys._MEIPASS) / "ffmpeg",
+                    Path(sys._MEIPASS) / "ffmpeg" / "ffmpeg",
+                    Path(sys.executable).parent / "ffmpeg",
+                ]
+                for c in candidates:
+                    if c.exists() and os.access(str(c), os.X_OK):
+                        ffmpeg_bin = str(c)
+                        print(f"waveform: using bundled ffmpeg: {ffmpeg_bin}")
+                        break
+
+            # 2. Системный ffmpeg (для запуска из исходников)
             if not ffmpeg_bin:
-                print("waveform: ffmpeg not found")
+                for p in ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']:
+                    if os.path.exists(p):
+                        ffmpeg_bin = p
+                        print(f"waveform: using system ffmpeg: {ffmpeg_bin}")
+                        break
+
+            if not ffmpeg_bin:
+                print("waveform: ffmpeg not found (bundled or system)")
                 return None
 
             cmd = [

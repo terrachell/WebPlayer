@@ -251,14 +251,14 @@
   // РЕАКЦИЯ НА ТИК ПОЗИЦИИ (60 fps)
   // ============================================================
   function onPlayerTick(position) {
-    if (!lines.length) return;
-    if (!window.currentStatus) return;
+      if (!lines.length) return;
+      if (!currentStatus) return;
 
-    const total = (window.currentStatus.track_info && window.currentStatus.track_info.duration) || 0;
-    if (total <= 0) return;
+      const total = (currentStatus.track_info && currentStatus.track_info.duration) || 0;
+      if (total <= 0) return;
 
-    const seconds = position * total;
-    setActiveLine(findActiveIndex(seconds));
+      const seconds = position * total;
+      setActiveLine(findActiveIndex(seconds));
   }
 
   // ============================================================

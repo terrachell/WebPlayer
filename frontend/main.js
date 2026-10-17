@@ -109,6 +109,69 @@ window.showOffsetToast = function(ms) {
 };
 
 // ============================================================
+// ===== INLINE PROMPT (замена нативного prompt()) ============
+// ============================================================
+function showInlinePrompt(label, defaultValue = '') {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('inlinePromptOverlay');
+        const labelEl = document.getElementById('inlinePromptLabel');
+        const inputEl = document.getElementById('inlinePromptInput');
+        const okBtn = document.getElementById('inlinePromptOk');
+        const cancelBtn = document.getElementById('inlinePromptCancel');
+
+        if (!overlay || !labelEl || !inputEl) {
+            // Fallback на нативный prompt, если элементов нет
+            const r = prompt(label, defaultValue);
+            resolve(r);
+            return;
+        }
+
+        labelEl.textContent = label;
+        inputEl.value = defaultValue;
+        overlay.hidden = false;
+
+        // Фокус после отрисовки
+        requestAnimationFrame(() => {
+            inputEl.focus();
+            inputEl.select();
+        });
+
+        let finished = false;
+
+        const finish = (value) => {
+            if (finished) return;
+            finished = true;
+            overlay.hidden = true;
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            inputEl.removeEventListener('keydown', onKey);
+            overlay.removeEventListener('click', onOverlayClick);
+            resolve(value);
+        };
+
+        const onOk = () => finish(inputEl.value.trim());
+        const onCancel = () => finish(null);
+        const onKey = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                onOk();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                onCancel();
+            }
+        };
+        const onOverlayClick = (e) => {
+            if (e.target === overlay) onCancel();
+        };
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        inputEl.addEventListener('keydown', onKey);
+        overlay.addEventListener('click', onOverlayClick);
+    });
+}
+
+// ============================================================
 // ===== БЕГУЩАЯ СТРОКА =======================================
 // ============================================================
 function setupMarquee(el) {
@@ -1159,8 +1222,8 @@ window.addEventListener('resize', closeContextMenu);
 // ============================================================
 // ===== ДИАЛОГИ ДЛЯ ПОЛЕЙ ====================================
 // ============================================================
-function promptRenameTrack(path, current) {
-    const value = prompt('Новое название трека:', current || '');
+async function promptRenameTrack(path, current) {
+    const value = await showInlinePrompt('Новое название трека:', current || '');
     if (value === null) return;
     const trimmed = value.trim();
     if (!trimmed) {
@@ -1170,8 +1233,8 @@ function promptRenameTrack(path, current) {
     api.call('rename_track', path, trimmed).then(loadStatus).catch(console.error);
 }
 
-function promptSetField(path, field, label, current) {
-    const value = prompt(`${label}:`, current || '');
+async function promptSetField(path, field, label, current) {
+    const value = await showInlinePrompt(`${label}:`, current || '');
     if (value === null) return;
     const trimmed = value.trim();
     api.call('set_track_meta', path, { [field]: trimmed || null })
