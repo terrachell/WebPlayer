@@ -7,5 +7,5 @@
   "slot": "content",
   "entry": "index.html",
   "styles": ["style.css"],
-  "scripts": ["script.js"]
+  "scripts": ["qrcode.min.js", "script.js"]
 }

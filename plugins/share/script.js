@@ -87,52 +87,52 @@
   // ============================================================
   // ЗАГРУЗКА URL ОТ PYTHON
   // ============================================================
-  let qrLoadedForUrl = null;
 
-  async function loadShare() {
-    const urlEl = document.getElementById('share-url');
+async function loadShare() {
     const codeEl = document.getElementById('share-code');
-
     if (codeEl) codeEl.innerHTML = '<div class="share-placeholder">Загрузка...</div>';
 
     try {
-      const result = await window.WebPlayer.pluginCall('share', 'get_url');
-      const url = result && result.url;
-      if (!url) throw new Error('URL не получен');
+        const result = await window.WebPlayer.pluginCall('share', 'get_url');
+        const url = result && result.url;
+        if (!url) throw new Error('URL не получен');
 
-      if (urlEl) urlEl.textContent = url;
-
-      if (qrLoadedForUrl !== url) {
         renderQR(url);
-        qrLoadedForUrl = url;
-      }
     } catch (e) {
-      err('loadShare упал:', e);
-      if (codeEl) codeEl.innerHTML = '<div class="share-placeholder">Ошибка</div>';
-      if (urlEl) urlEl.textContent = '—';
+        err('loadShare упал:', e);
+        if (codeEl) codeEl.innerHTML = '<div class="share-placeholder">Ошибка</div>';
     }
-  }
+}
 
   // ============================================================
   // QR-РЕНДЕР
   // ============================================================
-  function renderQR(url) {
+function renderQR(url) {
     const codeEl = document.getElementById('share-code');
     if (!codeEl) return;
 
-    const img = document.createElement('img');
-    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
-    img.alt = 'QR';
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.onerror = () => {
-      err('не удалось загрузить QR-изображение');
-      codeEl.innerHTML = '<div class="share-placeholder">QR недоступен (нет интернета?)</div>';
-    };
-
     codeEl.innerHTML = '';
-    codeEl.appendChild(img);
-  }
+
+    if (typeof QRCode === 'undefined') {
+        err('QRCode библиотека не загружена');
+        codeEl.innerHTML = '<div class="share-placeholder">QR недоступен</div>';
+        return;
+    }
+
+    try {
+        new QRCode(codeEl, {
+            text: url,
+            width: 220,
+            height: 220,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M,
+        });
+    } catch (e) {
+        err('ошибка генерации QR:', e);
+        codeEl.innerHTML = '<div class="share-placeholder">Ошибка QR</div>';
+    }
+}
 
   // ============================================================
   // СТАРТ
